@@ -1,12 +1,21 @@
 use crate::sync::{LazyLock, Mutex};
 use volatile::Volatile;
+use x86_64::instructions::port::Port;
 
 pub static WRITER: LazyLock<Mutex<Writer>> = LazyLock::new(&|| {
-  Mutex::new(Writer {
-    column_position: 0,
+  let mut writer = Writer {
+    row_position: 0,
+    col_position: 0,
+    register_port: Port::new(0x3d4),
+    value_port: Port::new(0x3d5),
     colour_code: ColourCode::new(Colour::LightCyan, Colour::Black),
     buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
-  })
+  };
+
+  writer.set_cursor_height(0xf);
+  writer.hide_cursor();
+
+  Mutex::new(writer)
 });
 
 #[allow(dead_code)]
@@ -57,42 +66,104 @@ struct Buffer {
 }
 
 pub struct Writer {
-  column_position: usize,
+  col_position: usize,
+  row_position: usize,
+  register_port: Port<u8>,
+  value_port: Port<u8>,
   colour_code: ColourCode,
   buffer: &'static mut Buffer,
 }
 
 impl Writer {
-  pub fn write_byte(&mut self, byte: u8) {
+  #[doc(hidden)]
+  fn _write_byte(&mut self, byte: u8) {
     match byte {
       b'\n' => self.new_line(),
       byte => {
-        if self.column_position >= BUFFER_WIDTH {
+        if self.col_position >= BUFFER_WIDTH {
           self.new_line();
         }
 
-        let row = BUFFER_HEIGHT - 1;
-        let col = self.column_position;
+        let row = self.row_position;
+        let col = self.col_position;
         let colour_code = self.colour_code;
         self.buffer.chars[row][col].write(ScreenChar {
           ascii_character: byte,
           colour_code,
         });
-        self.column_position += 1;
+        self.col_position += 1;
       }
     }
   }
 
+  pub fn write_byte(&mut self, byte: u8) {
+    self._write_byte(byte);
+    self.move_cursor_to_position(self.row_position, self.col_position);
+  }
+
   fn new_line(&mut self) {
-    self.column_position = 0;
+    self.col_position = 0;
+    self.row_position += 1;
+    if self.row_position >= BUFFER_HEIGHT {
+      self.row_position = 0;
+    }
+    self.clear_line(self.row_position);
+  }
+
+  fn clear_line(&mut self, line: usize) {
+    let stashed_col = self.col_position;
+    let stashed_row = self.row_position;
+    self.col_position = 0;
+    self.row_position = line;
+    for _ in 0..BUFFER_WIDTH {
+      self.write_byte(b' ');
+    }
+    self.col_position = stashed_col;
+    self.row_position = stashed_row;
   }
 
   pub fn write_string(&mut self, s: &str) {
     for byte in s.bytes() {
       match byte {
-        0x20..=0x7e | b'\n' => self.write_byte(byte),
-        _ => self.write_byte(0xfe),
+        0x20..=0x7e | b'\n' => self._write_byte(byte),
+        _ => self._write_byte(0xfe),
       }
+    }
+    self.move_cursor_to_position(self.row_position, self.col_position);
+  }
+
+  pub fn hide_cursor(&mut self) {
+    unsafe {
+      self.register_port.write(0x0a);
+      let value = self.value_port.read() | 0x20;
+      self.value_port.write(value);
+    }
+  }
+
+  pub fn show_cursor(&mut self) {
+    unsafe {
+      self.register_port.write(0x0a);
+      let value = self.value_port.read() & (0xff ^ 0x20);
+      self.value_port.write(value);
+    }
+  }
+
+  pub fn move_cursor_to_position(&mut self, row: usize, col: usize) {
+    let pos: u16 = (row * BUFFER_WIDTH + col) as u16;
+
+    unsafe {
+      self.register_port.write(0x0f);
+      self.value_port.write((pos & 0xff) as u8);
+      self.register_port.write(0x0e);
+      self.value_port.write(((pos >> 8) & 0xff) as u8);
+    }
+  }
+
+  pub fn set_cursor_height(&mut self, shape: u8) {
+    unsafe {
+      self.register_port.write(0x0a);
+      let value = self.value_port.read() & 0xf0;
+      self.value_port.write(value | (0xf - (shape & 0x0f)));
     }
   }
 }
