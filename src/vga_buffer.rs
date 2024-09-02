@@ -42,10 +42,10 @@ pub enum Colour {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
-struct ColourCode(u8);
+pub struct ColourCode(u8);
 
 impl ColourCode {
-  const fn new(foreground: Colour, background: Colour) -> Self {
+  pub const fn new(foreground: Colour, background: Colour) -> Self {
     ColourCode((background as u8) << 4 | foreground as u8)
   }
 }
@@ -66,11 +66,11 @@ struct Buffer {
 }
 
 pub struct Writer {
-  col_position: usize,
-  row_position: usize,
+  pub col_position: usize,
+  pub row_position: usize,
   register_port: Port<u8>,
   value_port: Port<u8>,
-  colour_code: ColourCode,
+  pub colour_code: ColourCode,
   buffer: &'static mut Buffer,
 }
 
@@ -175,17 +175,80 @@ impl core::fmt::Write for Writer {
   }
 }
 
-#[macro_export]
-macro_rules! println {
-  () => {
-    print!("\n")
-  };
-  ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+#[doc(hidden)]
+pub fn _print(args: ::core::fmt::Arguments) {
+  use core::fmt::Write;
+  crate::vga_buffer::WRITER.lock().write_fmt(args).unwrap();
 }
 
-#[macro_export]
-macro_rules! print {
-  ($($arg:tt)*) => {
-    $crate::io::_print(format_args!($($arg)*))
-  };
+#[cfg(test)]
+#[test_case]
+fn println_simple() {
+  crate::println!("simple println test");
+}
+
+#[cfg(test)]
+#[test_case]
+fn println_many() {
+  for _ in 0..200 {
+    crate::println!("many println test");
+  }
+}
+
+#[cfg(test)]
+#[test_case]
+fn println_output() {
+  let s = "println output test";
+  crate::println!("\n{}", s);
+  for (i, c) in s.chars().enumerate() {
+    let writer = WRITER.lock();
+    let screen_char = writer.buffer.chars[writer.row_position - 1][i].read();
+    assert_eq!(char::from(screen_char.ascii_character), c);
+  }
+}
+
+#[cfg(test)]
+#[test_case]
+fn println_colour() {
+  let mut writer = WRITER.lock();
+  let colour_code = ColourCode::new(Colour::LightGreen, Colour::Red);
+  writer.colour_code = colour_code;
+
+  crate::print!("\nc");
+  assert_eq!(
+    colour_code,
+    writer.buffer.chars[writer.row_position][writer.col_position - 1]
+      .read()
+      .colour_code
+  )
+}
+
+#[cfg(test)]
+#[test_case]
+fn cursor_position() {
+  let mut writer = WRITER.lock();
+  writer.move_cursor_to_position(14, 3);
+
+  let mut pos: u16 = 0;
+  unsafe {
+    writer.register_port.write(0x0f);
+    pos |= writer.value_port.read() as u16;
+    writer.register_port.write(0x0e);
+    pos |= (writer.value_port.read() as u16) << 8;
+  }
+  assert_eq!(3, pos as usize % BUFFER_WIDTH);
+  assert_eq!(14, pos as usize / BUFFER_WIDTH);
+}
+
+#[cfg(test)]
+#[test_case]
+fn cursor_height() {
+  let mut writer = WRITER.lock();
+  writer.set_cursor_height(0x3);
+  let height;
+  unsafe {
+    writer.register_port.write(0x0a);
+    height = writer.value_port.read() & 0xf;
+  }
+  assert_eq!(0xf - 0x3, height)
 }

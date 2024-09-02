@@ -9,16 +9,33 @@
 use vga_buffer::WRITER;
 
 mod io;
+mod serial;
 mod sync;
 mod vga_buffer;
 
 static WELCOME_TEXT: &str = "Welcome to TITANIUM";
 
+pub trait Testable {
+  fn run(&self);
+}
+
+impl<T: Fn()> Testable for T {
+  fn run(&self) {
+    let name = core::any::type_name::<T>();
+    serial_print!("{}...", name);
+    for _ in name.len() + 3..60 {
+      serial_print!(" ");
+    }
+    self();
+    serial_println!("[\x1b[0;32mok\x1b[0m]");
+  }
+}
+
 #[cfg(test)]
-pub fn test_runner(tests: &[&dyn Fn()]) {
-  println!("Running {} tests", tests.len());
+pub fn test_runner(tests: &[&dyn Testable]) {
+  serial_println!("Running {} tests", tests.len());
   for test in tests {
-    test();
+    test.run();
   }
 
   exit_qemu(QemuExitCode::Success);
@@ -26,11 +43,11 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
-  println!("{}", WELCOME_TEXT);
-  WRITER.lock().show_cursor();
-
   #[cfg(test)]
   test_main();
+
+  println!("{}", WELCOME_TEXT);
+  WRITER.lock().show_cursor();
 
   loop {}
 }
@@ -55,20 +72,24 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
 
 #[cfg(not(test))]
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+  use vga_buffer::{Colour, ColourCode};
+
+  WRITER.lock().colour_code = ColourCode::new(Colour::LightRed, Colour::Black);
+  println!("{:#?}", info);
   loop {}
 }
 
 #[cfg(test)]
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+  serial_println!("[\x1b[0;31mfailed\x1b[0m]");
+  serial_println!("{:#?}", info);
   exit_qemu(QemuExitCode::Failure);
   loop {}
 }
 
 #[test_case]
 fn trivial_assertion() {
-  print!("Trivial assertion...");
   assert_eq!(1, 1);
-  println!("[ok]");
 }
