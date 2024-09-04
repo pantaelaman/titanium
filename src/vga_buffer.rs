@@ -117,7 +117,13 @@ impl Writer {
     self.col_position = 0;
     self.row_position += 1;
     if self.row_position >= BUFFER_HEIGHT {
-      self.row_position = 0;
+      self.row_position = BUFFER_HEIGHT - 1;
+      for line in 1..BUFFER_HEIGHT {
+        for chr in 0..BUFFER_WIDTH {
+          self.buffer.chars[line - 1][chr]
+            .write(self.buffer.chars[line][chr].read());
+        }
+      }
     }
     self.clear_line(self.row_position);
   }
