@@ -9,6 +9,7 @@ pub static WRITER: LazyLock<Mutex<Writer>> = LazyLock::new(&|| {
     register_port: Port::new(0x3d4),
     value_port: Port::new(0x3d5),
     colour_code: ColourCode::new(Colour::LightCyan, Colour::Black),
+    stashed_colour_code: ColourCode::new(Colour::LightCyan, Colour::Black),
     buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
   };
 
@@ -40,6 +41,12 @@ pub enum Colour {
   White,
 }
 
+impl Into<ColourCode> for Colour {
+  fn into(self) -> ColourCode {
+    ColourCode::new_fg(self)
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct ColourCode(u8);
@@ -47,6 +54,10 @@ pub struct ColourCode(u8);
 impl ColourCode {
   pub const fn new(foreground: Colour, background: Colour) -> Self {
     ColourCode((background as u8) << 4 | foreground as u8)
+  }
+
+  pub const fn new_fg(foreground: Colour) -> Self {
+    Self::new(foreground, Colour::Black)
   }
 }
 
@@ -71,6 +82,7 @@ pub struct Writer {
   register_port: Port<u8>,
   value_port: Port<u8>,
   pub colour_code: ColourCode,
+  stashed_colour_code: ColourCode,
   buffer: &'static mut Buffer,
 }
 
@@ -165,6 +177,15 @@ impl Writer {
       let value = self.value_port.read() & 0xf0;
       self.value_port.write(value | (0xf - (shape & 0x0f)));
     }
+  }
+
+  pub fn set_temp_colour_code(&mut self, colour_code: ColourCode) {
+    self.stashed_colour_code = self.colour_code;
+    self.colour_code = colour_code;
+  }
+
+  pub fn release_temp_colour_code(&mut self) {
+    self.colour_code = self.stashed_colour_code;
   }
 }
 
