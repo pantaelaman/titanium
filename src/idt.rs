@@ -1,8 +1,12 @@
 use core::mem::MaybeUninit;
 
-use x86_64::{VirtAddr, registers::segmentation::{self, Segment}, structures::{DescriptorTablePointer, gdt::SegmentSelector}};
+use x86_64::{
+  VirtAddr,
+  registers::segmentation::{self, Segment},
+  structures::{DescriptorTablePointer, gdt::SegmentSelector},
+};
 
-use crate::serial_println;
+use crate::{serial_print, serial_println};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -18,7 +22,6 @@ impl Options {
   pub fn new() -> Self {
     let mut options = Self::empty();
     options.0 |= 1 << 15; // make it present
-    options.0 |= 1 << 8; // trap type (disable interrupts)
     options
   }
 
@@ -28,6 +31,11 @@ impl Options {
 
   pub fn is_trap(&self) -> bool {
     self.0 & (1 << 8) != 0
+  }
+
+  pub fn with_trap(&mut self, trapped: bool) -> &mut Self {
+    self.0 = (self.0 & !(1 << 8)) | ((trapped as u16) << 8);
+    self
   }
 }
 
@@ -69,17 +77,42 @@ impl Entry {
 
 type HandlerFn = extern "C" fn() -> !;
 
-extern "C" fn default_handler() -> ! {
-  serial_println!("=== INTERRUPT TRIGGERED ===");
+macro_rules! handler {
+  ($name:ident) => {{
+    #[unsafe(naked)]
+    extern "C" fn wrapper() -> ! {
+      core::arch::naked_asm! {
+        "mov rdi, rsp",
+        "call {}",
+        "iretq",
+        sym $name,
+      };
+    }
 
-  loop {
-    x86_64::instructions::hlt();
-  }
+    wrapper
+  }};
+}
+
+macro_rules! handler_with_ec {
+  ($name:ident) => {{
+    #[unsafe(naked)]
+    extern "C" fn wrapper() -> ! {
+      core::arch::naked_asm! {
+        "pop rsi",
+        "mov rdi, rsp",
+        "call {}",
+        "iretq",
+        sym $name,
+      };
+    }
+
+    wrapper
+  }}
 }
 
 #[derive(Debug)]
 #[repr(C)]
-struct ExceptionStackFrame {
+struct InterruptStackFrame {
   ip: u64,
   cs: u64,
   rflags: u64,
@@ -87,39 +120,30 @@ struct ExceptionStackFrame {
   ss: u64,
 }
 
-#[unsafe(naked)]
-extern "C" fn double_fault_handler() -> ! {
-  core::arch::naked_asm! {
-    "pop rsi",
-    "mov rdi, rsp",
-    "call {}",
-    sym handler,
-  };
+extern "C" fn double_fault_handler(stack_frame: *const InterruptStackFrame, ec: u64) -> ! {
+  let stack_frame = unsafe { &*stack_frame };
+  serial_println!("=== DOUBLE FAULT ===");
+  serial_println!("{:#?}", stack_frame);
 
-  extern "C" fn handler(stack_frame: *const ExceptionStackFrame, ec: u64) -> ! {
-    let stack_frame = unsafe { &*stack_frame };
-    serial_println!("=== DOUBLE FAULT ===");
-    serial_println!("{:#?}", stack_frame);
-
-    loop {
-      x86_64::instructions::hlt();
-    }
+  loop {
+    x86_64::instructions::hlt();
   }
 }
 
-#[unsafe(naked)]
-extern "C" fn breakpoint_handler() -> ! {
-  core::arch::naked_asm! {
-    "mov rdi, rsp",
-    "call {}",
-    "iretq",
-    sym handler,
-  };
+extern "C" fn breakpoint_handler(stack_frame: *const InterruptStackFrame) {
+  let stack_frame = unsafe { &*stack_frame };
+  serial_println!("=== BREAKPOINT ===");
+  serial_println!("{:#?}", stack_frame);
+}
 
-  extern "C" fn handler(stack_frame: *const ExceptionStackFrame) {
-    let stack_frame = unsafe { &*stack_frame };
-    serial_println!("=== BREAKPOINT ===");
-    serial_println!("{:#?}", stack_frame);
+extern "C" fn page_fault_handler(stack_frame: *const InterruptStackFrame, ec: u64) -> ! {
+  let stack_frame = unsafe { &*stack_frame };
+  serial_println!("=== PAGE FAULT ===");
+  serial_println!("EC: {}", ec);
+  serial_println!("{:#?}", stack_frame);
+
+  loop {
+    x86_64::instructions::hlt();
   }
 }
 
@@ -135,7 +159,8 @@ impl InterruptDescriptorTable {
   }
 
   pub fn set_handler(&mut self, entry: u8, handler: HandlerFn) -> &mut Options {
-    self.entries[entry as usize] = Entry::new(segmentation::CS::get_reg(), handler);
+    self.entries[entry as usize] =
+      Entry::new(segmentation::CS::get_reg(), handler);
     &mut self.entries[entry as usize].opts
   }
 
@@ -151,7 +176,6 @@ impl InterruptDescriptorTable {
   }
 }
 
-
 static mut IDT: MaybeUninit<InterruptDescriptorTable> = MaybeUninit::uninit();
 
 pub fn init_interrupts() {
@@ -160,8 +184,9 @@ pub fn init_interrupts() {
     IDT.write(InterruptDescriptorTable::new())
   };
 
-  idt.set_handler(3, breakpoint_handler);
-  idt.set_handler(8, double_fault_handler);
+  idt.set_handler(3, handler!(breakpoint_handler)).with_trap(false);
+  idt.set_handler(8, handler_with_ec!(double_fault_handler)).with_trap(true);
+  idt.set_handler(14, handler_with_ec!(page_fault_handler)).with_trap(true);
   idt.load();
 
   x86_64::instructions::interrupts::enable();
