@@ -21,6 +21,6 @@ build:
   ./limine/limine bios-install image.iso
 
 run:
-  qemu-system-x86_64 -boot d -cdrom image.iso -m 8G -serial stdio
+  qemu-system-x86_64 -boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm
 
 fresh: build run

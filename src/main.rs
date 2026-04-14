@@ -1,11 +1,22 @@
+#![feature(abi_x86_interrupt)]
 #![feature(ptr_metadata)]
 #![feature(ptr_cast_array)]
 #![no_std]
 #![no_main]
 
+use x86_64::{
+  VirtAddr,
+  registers::rflags::RFlags,
+  structures::{
+    gdt::SegmentSelector,
+    idt::{InterruptDescriptorTable, InterruptStackFrame},
+  },
+};
+
+mod framebuffer;
+mod idt;
 mod limine;
 mod serial;
-mod framebuffer;
 mod util;
 
 #[panic_handler]
@@ -23,6 +34,13 @@ unsafe extern "C" fn kmain() -> ! {
 
   serial_println!("Welcome to Rune!");
 
+  idt::init_interrupts();
+
+  serial_println!(
+    "are interrupts enabled? {}",
+    x86_64::instructions::interrupts::are_enabled()
+  );
+
   if let Some(framebuffer) = limine::framebuffers().and_then(|b| b.first()) {
     serial_println!(
       "Found framebuffer ({},{})",
@@ -31,8 +49,16 @@ unsafe extern "C" fn kmain() -> ! {
     );
 
     framebuffer::draw_icon(framebuffer);
-    framebuffer::print_str_at(framebuffer, framebuffer::Point { x: 0, y: 0 }, "Hello, world!");
+    framebuffer::print_str_at(
+      framebuffer,
+      framebuffer::Point { x: 0, y: 0 },
+      "Hello, world!",
+    );
   }
+
+  x86_64::instructions::interrupts::int3();
+
+  serial_println!("made it past the breakpoint");
 
   loop {
     x86_64::instructions::hlt();
