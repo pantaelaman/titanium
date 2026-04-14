@@ -1,3 +1,4 @@
+#![feature(ptr_metadata)]
 #![feature(ptr_cast_array)]
 #![no_std]
 #![no_main]
@@ -5,6 +6,7 @@
 mod limine;
 mod serial;
 mod framebuffer;
+mod util;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -29,6 +31,7 @@ unsafe extern "C" fn kmain() -> ! {
     );
 
     framebuffer::draw_icon(framebuffer);
+    framebuffer::print_str_at(framebuffer, framebuffer::Point { x: 0, y: 0 }, "Hello, world!");
   }
 
   loop {

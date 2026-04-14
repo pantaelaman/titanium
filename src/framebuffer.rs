@@ -1,10 +1,7 @@
 pub use crate::limine::Framebuffer;
-use crate::serial_println;
+use crate::{serial_println, util::AlignedTo};
 
-struct AlignedTo<Align, Bytes: ?Sized> {
-  _align: [Align; 0],
-  bytes: Bytes,
-}
+mod font;
 
 const ALIGNED_ICON: &'static AlignedTo<u32, [u8]> = &AlignedTo {
   _align: [],
@@ -14,6 +11,28 @@ const ALIGNED_ICON: &'static AlignedTo<u32, [u8]> = &AlignedTo {
 const ICON_HEIGHT: usize = 256;
 const ICON_WIDTH: usize = 256;
 const ICON_DATA: *const u32 = ALIGNED_ICON.bytes.as_ptr().cast();
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Point {
+  pub x: usize,
+  pub y: usize,
+}
+
+impl core::ops::Add for Point {
+  type Output = Point;
+
+  fn add(self, rhs: Self) -> Self::Output {
+    Self { x: self.x + rhs.x, y: self.y + rhs.y }
+  }
+}
+
+impl core::ops::Sub for Point {
+  type Output = Point;
+
+  fn sub(self, rhs: Self) -> Self::Output {
+    Self { x: self.x - rhs.x, y: self.y - rhs.y }
+  }
+}
 
 pub fn draw_icon(framebuffer: &Framebuffer) {
   let (cx, cy) = (
@@ -40,3 +59,16 @@ pub fn draw_icon(framebuffer: &Framebuffer) {
   }
 }
 
+pub fn print_str_at(framebuffer: &Framebuffer, point: Point, string: &str) {
+  let galley = font::Galley {
+    text: string,
+    width: font::Dim::Unbounded,
+    height: font::Dim::Unbounded,
+  };
+  const STYLE: font::Style = font::Style {
+    fg: 0xff00ff00,
+    bg: 0x00000000,
+  };
+
+  font::draw_galley_at(framebuffer, &galley, &STYLE, point);
+}
