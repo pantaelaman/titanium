@@ -173,7 +173,7 @@ unsafe extern "C" fn kmain() -> ! {
   //let mut rtc = ioapic.enable_rtc();
   //rtc.set_rate(3);
   loop {
-    pit.sleep_us(1_000);
+    pit.sleep_us(1_000_000);
     serial_print!(".");
   }
 

@@ -55,22 +55,34 @@ static TIMER_COUNTER: TimerCounter = TimerCounter {
 const FP_WIDTH: usize = 24;
 const PIT_NATIVE_FREQ: u64 = 1193182;
 // standard reload value for timer functionality
-const PIT_TIMER_RLD: u16 = 1193;
+// --- IMPORTANT: QEMU NEEDS THIS TO BE 600 OR ELSE IT FUCKS IT ALL UP
+const PIT_TIMER_RLD: u16 = 600;
 
 // fixed point 40.24
 // calculated manually from PIT_NATIVE_FREQ / PIT_TIMER_RLD
-// ~10.05714  microseconds per interrupt
-const PIT_INTERVAL: u64 = 0x0_fff600;
+// 5 us per interrupt
+//const PIT_INTERVAL: u64 = 0x5_075068;
+const PIT_INTERVAL: u64 = 0x1f6_db68b1;
 
 #[unsafe(naked)]
 pub extern "C" fn pit_interrupt() -> ! {
   unsafe {
     core::arch::naked_asm! {
-      "inc dword ptr {timer}",
+      "push rax",
+      "push rbx",
+      "pushf",
+      "mov rax, {timer}",
+      "mov rbx, {incr}",
+      "add rax, rbx",
+      "mov {timer}, rax",
       "mov rax, 0",
       "movabs [{eoi}], rax",
+      "popf",
+      "pop rbx",
+      "pop rax",
       "iretq",
       timer = sym TIMER_COUNTER,
+      incr = const PIT_INTERVAL,
       eoi = const vmem::LAPIC_EOI_ADDR.as_u64(),
     }
   }
@@ -83,7 +95,7 @@ pub extern "C" fn pit_interrupt() -> ! {
 //  );
 //}
 
-pub fn debug_timer() {
+pub extern "C" fn debug_timer() {
   let timer = TIMER_COUNTER.counter.load(Ordering::Relaxed);
   serial_println!(
     "current pit counter: {} ({:x}.{:6x})",
@@ -131,7 +143,7 @@ impl PIT {
     self.send_command(
       Channel::Chan0,
       AccessMode::LoHiByte,
-      OperatingMode::RateGen,
+      OperatingMode::SquareGen,
       false,
     );
     unsafe {
