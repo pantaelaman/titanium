@@ -49,7 +49,8 @@ pub fn draw_icon(framebuffer: &Framebuffer) {
         .cast::<u32>()
     };
     for x in 0..ICON_WIDTH {
-      let px_data = unsafe { *ICON_DATA.add(x + y * ICON_HEIGHT) };
+      let [r,g,b,a] = unsafe { *ICON_DATA.add(x + y * ICON_HEIGHT) }.to_le_bytes();
+      let px_data = u32::from_le_bytes([b,g,r,a]);
       unsafe {
         row_ptr
           .add(sx + x)

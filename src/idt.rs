@@ -2,11 +2,19 @@ use core::mem::MaybeUninit;
 
 use x86_64::{
   VirtAddr,
-  registers::segmentation::{self, Segment},
+  registers::{
+    rflags::RFlags,
+    segmentation::{self, Segment},
+  },
   structures::{DescriptorTablePointer, gdt::SegmentSelector},
 };
 
-use crate::{serial_print, serial_println};
+use crate::{serial_print, serial_println, vmem::LAPIC_ADDR};
+
+pub const IRQ_LAPIC_CLK: u8 = 0x32;
+pub const IRQ_PIT: u8 = 0x33;
+pub const IRQ_RTC: u8 = 0x34;
+pub const IRQ_HPET: u8 = 0x35;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -93,6 +101,25 @@ macro_rules! handler {
   }};
 }
 
+macro_rules! handler_from_lapic {
+  ($name:path) => {{
+    #[unsafe(naked)]
+    extern "C" fn wrapper() -> ! {
+      core::arch::naked_asm! {
+        "mov rdi, rsp",
+        "call {}",
+        "mov rax, 0",
+        "movabs [{}], rax",
+        "iretq",
+        sym $name,
+        const LAPIC_ADDR.as_u64() + 0xb0,
+      }
+    }
+
+    wrapper
+  }};
+}
+
 macro_rules! handler_with_ec {
   ($name:ident) => {{
     #[unsafe(naked)]
@@ -107,10 +134,9 @@ macro_rules! handler_with_ec {
     }
 
     wrapper
-  }}
+  }};
 }
 
-#[derive(Debug)]
 #[repr(C)]
 struct InterruptStackFrame {
   ip: u64,
@@ -120,7 +146,42 @@ struct InterruptStackFrame {
   ss: u64,
 }
 
-extern "C" fn double_fault_handler(stack_frame: *const InterruptStackFrame, ec: u64) -> ! {
+impl core::fmt::Debug for InterruptStackFrame {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    if f.alternate() {
+      write!(
+        f,
+        "InterruptStackFrame {{
+  ip: 0x{:016x},
+  cs: {},
+  rflags: {:?},
+  sp: 0x{:016x},
+  ss: {}
+}}",
+        self.ip,
+        self.cs,
+        RFlags::from_bits_retain(self.rflags),
+        self.sp,
+        self.ss
+      )
+    } else {
+      write!(
+        f,
+        "InterruptStackFrame {{ ip: 0x{:016x}, cs: {}, rflags: {:?}, sp: 0x{:016x}, ss: {} }}",
+        self.ip,
+        self.cs,
+        RFlags::from_bits_retain(self.rflags),
+        self.sp,
+        self.ss
+      )
+    }
+  }
+}
+
+extern "C" fn double_fault_handler(
+  stack_frame: *const InterruptStackFrame,
+  ec: u64,
+) -> ! {
   let stack_frame = unsafe { &*stack_frame };
   serial_println!("=== DOUBLE FAULT ===");
   serial_println!("{:#?}", stack_frame);
@@ -136,9 +197,16 @@ extern "C" fn breakpoint_handler(stack_frame: *const InterruptStackFrame) {
   serial_println!("{:#?}", stack_frame);
 }
 
-extern "C" fn page_fault_handler(stack_frame: *const InterruptStackFrame, ec: u64) -> ! {
+extern "C" fn page_fault_handler(
+  stack_frame: *const InterruptStackFrame,
+  ec: u64,
+) -> ! {
   let stack_frame = unsafe { &*stack_frame };
   serial_println!("=== PAGE FAULT ===");
+  serial_println!(
+    "Accessed Address: {:?}",
+    x86_64::registers::control::Cr2::read()
+  );
   serial_println!("EC: {}", ec);
   serial_println!("{:#?}", stack_frame);
 
@@ -147,14 +215,70 @@ extern "C" fn page_fault_handler(stack_frame: *const InterruptStackFrame, ec: u6
   }
 }
 
+extern "C" fn pit_handler(stack_frame: *const InterruptStackFrame) {
+  serial_print!(".");
+}
+
+macro_rules! ec_fault_handler {
+  ($sym:ident, $name:expr) => {
+    extern "C" fn $sym(stack_frame: *const InterruptStackFrame, ec: u64) -> ! {
+      let stack_frame = unsafe { &*stack_frame };
+      serial_println!($name);
+      serial_print!("EC: 0x{:08x} ", ec);
+
+      if ec & 1 != 0 {
+        serial_print!("(external) ");
+      }
+
+      serial_println!(
+        "{}[{}]",
+        match (ec >> 1) & 0x3 {
+          0b00 => "GDT",
+          0b01 | 0b11 => "IDT",
+          0b10 => "LDT",
+          _ => unreachable!(),
+        },
+        (ec >> 3) & 0x1ff
+      );
+
+      serial_print!("{:#?}", stack_frame);
+
+      loop {
+        x86_64::instructions::hlt();
+      }
+    }
+  };
+}
+
+macro_rules! fault_handler {
+  ($sym:ident, $name:expr) => {
+    extern "C" fn $sym(stack_frame: *const InterruptStackFrame) {
+      let stack_frame = unsafe { &*stack_frame };
+      serial_println!($name);
+      serial_print!("{:#?}", stack_frame);
+
+      loop {
+        x86_64::instructions::hlt();
+      }
+    }
+  };
+}
+
+ec_fault_handler!(gp_fault_handler, "=== GP FAULT ===");
+ec_fault_handler!(ss_fault_handler, "=== SS FAULT ===");
+ec_fault_handler!(snp_handler, "=== SEGMENT NOT PRESENT ===");
+ec_fault_handler!(tss_inv_handler, "=== INVALID TSS ===");
+
+fault_handler!(inv_opcode_handler, "=== INVALID OPCODE ===");
+
 struct InterruptDescriptorTable {
-  entries: [Entry; 16],
+  entries: [Entry; 64],
 }
 
 impl InterruptDescriptorTable {
   pub fn new() -> Self {
     Self {
-      entries: [Entry::empty(); 16],
+      entries: [Entry::empty(); 64],
     }
   }
 
@@ -184,9 +308,51 @@ pub fn init_interrupts() {
     IDT.write(InterruptDescriptorTable::new())
   };
 
-  idt.set_handler(3, handler!(breakpoint_handler)).with_trap(false);
-  idt.set_handler(8, handler_with_ec!(double_fault_handler)).with_trap(true);
-  idt.set_handler(14, handler_with_ec!(page_fault_handler)).with_trap(true);
+  idt
+    .set_handler(3, handler!(breakpoint_handler))
+    .with_trap(false);
+  idt
+    .set_handler(6, handler!(inv_opcode_handler))
+    .with_trap(false);
+  idt
+    .set_handler(8, handler_with_ec!(double_fault_handler))
+    .with_trap(true);
+  idt
+    .set_handler(10, handler_with_ec!(tss_inv_handler))
+    .with_trap(true);
+  idt
+    .set_handler(11, handler_with_ec!(snp_handler))
+    .with_trap(true);
+  idt
+    .set_handler(12, handler_with_ec!(ss_fault_handler))
+    .with_trap(true);
+  idt
+    .set_handler(13, handler_with_ec!(gp_fault_handler))
+    .with_trap(true);
+  idt
+    .set_handler(14, handler_with_ec!(page_fault_handler))
+    .with_trap(true);
+
+  idt.set_handler(
+    IRQ_LAPIC_CLK,
+    handler_from_lapic!(crate::hdint::lapic_clk_interrupt),
+  );
+
+  idt.set_handler(
+    IRQ_PIT,
+    crate::hdint::pit::pit_interrupt,
+  );
+
+  idt.set_handler(
+    IRQ_RTC,
+    handler_from_lapic!(crate::hdint::rtc::rtc_interrupt),
+  );
+
+  idt.set_handler(
+    IRQ_HPET,
+    handler_from_lapic!(crate::hdint::hpet::hpet_interrupt),
+  );
+
   idt.load();
 
   x86_64::instructions::interrupts::enable();

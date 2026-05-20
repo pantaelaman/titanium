@@ -18,9 +18,14 @@ panic = "abort"
 cc = "1.2.60"
 
 [dependencies]
+acpi = { version = "6.1.1", default-features = false, features = ["alloc", "aml"] }
+bitfield = "0.19.4"
 bitfields = "1.0.3"
+crossbeam = { version = "0.8.4", default-features = false, features = ["alloc", "nightly"] }
+fixed = "1.31.0"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 limine = "0.6.3"
+linked_list_allocator = "0.10.6"
 spin = "0.10.0"
 uart_16550 = "0.4.0"
 volatile = "0.6.1"
