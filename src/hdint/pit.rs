@@ -60,8 +60,7 @@ const PIT_TIMER_RLD: u16 = 600;
 
 // fixed point 40.24
 // calculated manually from PIT_NATIVE_FREQ / PIT_TIMER_RLD
-// 5 us per interrupt
-//const PIT_INTERVAL: u64 = 0x5_075068;
+// 502ish us per interrupt
 const PIT_INTERVAL: u64 = 0x1f6_db68b1;
 
 #[unsafe(naked)]
@@ -87,13 +86,6 @@ pub extern "C" fn pit_interrupt() -> ! {
     }
   }
 }
-
-//pub extern "C" fn pit_interrupt() {
-//  TIMER_COUNTER.counter.fetch_add(
-//    unsafe { core::mem::transmute(PIT_INTERVAL) },
-//    Ordering::Relaxed,
-//  );
-//}
 
 pub extern "C" fn debug_timer() {
   let timer = TIMER_COUNTER.counter.load(Ordering::Relaxed);

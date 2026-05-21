@@ -1,3 +1,4 @@
+#![feature(generic_atomic)]
 #![feature(int_lowest_highest_one)]
 #![feature(abi_x86_interrupt)]
 #![feature(ptr_metadata)]
@@ -11,13 +12,13 @@ extern crate alloc;
 use core::mem::MaybeUninit;
 
 use ::acpi::{
-  MadtError,
-  platform::AcpiPlatform,
-  sdt::{
+  MadtError, aml::namespace::AmlName, platform::AcpiPlatform, sdt::{
+    SdtHeader,
     hpet::HpetTable,
     madt::{Madt, MadtEntry},
-  },
+  }
 };
+use alloc::vec;
 use crossbeam::epoch::Pointable;
 use spin::Mutex;
 use x86_64::{
@@ -37,6 +38,7 @@ mod limine;
 mod paging;
 mod queue;
 mod serial;
+mod sys;
 mod util;
 mod vmem;
 
@@ -82,11 +84,13 @@ unsafe extern "C" fn kmain() -> ! {
 
   idt::init_interrupts();
 
-  unsafe {
-    x86_64::registers::control::Cr4::update(|flags| {
-      *flags |= Cr4Flags::OSFXSR;
-    });
-  }
+  // pretty sure I don't need this now that I have a custom target
+  // this would be to enable legacy SSE instructions
+  // unsafe {
+  //   x86_64::registers::control::Cr4::update(|flags| {
+  //     *flags |= Cr4Flags::OSFXSR;
+  //   });
+  // }
 
   serial_println!(
     "are interrupts enabled? {}",
@@ -169,28 +173,18 @@ unsafe extern "C" fn kmain() -> ! {
     ioapic.override_irq(ovr.irq as usize, ovr.global_system_interrupt as usize);
   }
 
-  let mut pit = ioapic.enable_pit();
-  //let mut rtc = ioapic.enable_rtc();
-  //rtc.set_rate(3);
-  loop {
-    pit.sleep_us(1_000_000);
-    serial_print!(".");
+  let mut pit = ioapic.init_pit();
+  unsafe {
+    lapic.setup_timer_pit(&mut pit);
   }
+  // don't need it after setting up the lapic's timer
+  ioapic.disable_pit();
 
-  //unsafe {
-  //  lapic.setup_timer_pit(&mut pit);
-  //}
-  //hdint::pit::debug_timer();
-
-  // let acpi_platform = AcpiPlatform::new(acpi_tables, &acpi::ACPIHandler {}).unwrap();
-  // let interpreter = ::acpi::aml::Interpreter::new_from_platform(&acpi_platform).unwrap();
-
-  x86_64::instructions::interrupts::int3();
-
-  //let mut executor = executor::Executor::new();
-  //executor.spawn(executor::Task::new(test()));
-  //
-  x86_64::instructions::interrupts::int3();
+  let acpi_platform =
+    AcpiPlatform::new(acpi_tables, &acpi::ACPIHandler {}).unwrap();
+  let interpreter =
+    ::acpi::aml::Interpreter::new_from_platform(&acpi_platform).unwrap();
+  let result = interpreter.evaluate(AmlName::root(), vec![]).unwrap();
 
   loop {
     x86_64::instructions::hlt();

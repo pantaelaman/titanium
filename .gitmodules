@@ -2,3 +2,6 @@
 	path = limine
 	url = https://github.com/limine-bootloader/limine.git
 	branch = v11.x-binary
+[submodule "acpica"]
+	path = acpica
+	url = https://github.com/acpica/acpica.git

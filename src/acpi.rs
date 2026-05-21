@@ -2,7 +2,7 @@ use core::{
   mem::MaybeUninit,
   ops::DerefMut,
   ptr::NonNull,
-  sync::atomic::{AtomicU64, Ordering},
+  sync::atomic::{Atomic, Ordering},
 };
 
 use acpi::{Handler, PhysicalMapping};
@@ -16,10 +16,9 @@ use x86_64::{
   },
 };
 
-use crate::{
-  paging, serial_println,
-};
+use crate::{paging, serial_println};
 
+#[derive(Default)]
 pub struct ACPIHandler {}
 
 impl<'a> Handler for &'a ACPIHandler {
@@ -31,7 +30,11 @@ impl<'a> Handler for &'a ACPIHandler {
     // physical regions are already mapped in the higher half (for now)
     PhysicalMapping {
       physical_start: physical_address,
-      virtual_start: unsafe { NonNull::new_unchecked((physical_address + crate::limine::hhdm_offset() as usize) as *mut T) },
+      virtual_start: unsafe {
+        NonNull::new_unchecked(
+          (physical_address + crate::limine::hhdm_offset() as usize) as *mut T,
+        )
+      },
       region_length: size,
       mapped_length: size,
       handler: &self,
@@ -118,26 +121,29 @@ impl<'a> Handler for &'a ACPIHandler {
   }
 
   fn stall(&self, microseconds: u64) {
-    unimplemented!()
+    assert!(microseconds < u32::MAX as u64);
+    crate::sys::sleep_local_us(microseconds as u32);
   }
 
   fn sleep(&self, milliseconds: u64) {
-    unimplemented!()
+    unimplemented!();
   }
 
+  // these functions can be super simple since we're not planning
+  // on multithreading until AFTER aml tables are parsed
   fn create_mutex(&self) -> acpi::Handle {
-    unimplemented!()
+    acpi::Handle(0)
   }
+
   fn acquire(
     &self,
     mutex: acpi::Handle,
     timeout: u16,
   ) -> Result<(), acpi::aml::AmlError> {
-    unimplemented!()
+    Ok(())
   }
-  fn release(&self, mutex: acpi::Handle) {
-    unimplemented!()
-  }
+
+  fn release(&self, mutex: acpi::Handle) {}
 }
 
 static mut PCI_ADDR: Port<u32> = Port::new(0xcf8);
@@ -148,7 +154,7 @@ static mut ACPI_HANDLER: MaybeUninit<ACPIHandler> = MaybeUninit::uninit();
 pub unsafe fn init() -> acpi::AcpiTables<&'static ACPIHandler> {
   unsafe {
     #[allow(static_mut_refs)]
-    ACPI_HANDLER.write(ACPIHandler {});
+    ACPI_HANDLER.write(ACPIHandler::default());
   };
 
   let rsdp_addr = PhysAddr::new(

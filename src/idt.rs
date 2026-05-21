@@ -335,7 +335,7 @@ pub fn init_interrupts() {
 
   idt.set_handler(
     IRQ_LAPIC_CLK,
-    handler_from_lapic!(crate::hdint::lapic_clk_interrupt),
+    crate::hdint::lapic_clk_interrupt,
   );
 
   idt.set_handler(

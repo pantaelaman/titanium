@@ -1,8 +1,13 @@
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{
+  AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering,
+};
 
 use crate::{
-  MapperAllocator, idt, serial_print, vmem::{APIC_NEXT_OFFSET, APIC_START, LAPIC_ADDR}
+  MapperAllocator, idt, serial_print,
+  vmem::{self, APIC_NEXT_OFFSET, APIC_START, LAPIC_ADDR},
 };
+use bitfield::bitfield;
+use fixed::{FixedU64, types::extra::U16};
 use x86_64::{
   PhysAddr, VirtAddr,
   structures::{
@@ -15,13 +20,15 @@ use x86_64::{
 
 use crate::serial_println;
 
+pub mod hpet;
 pub mod pit;
 pub mod rtc;
-pub mod hpet;
 
 pub const GLOBAL_PIT: usize = 0;
 pub const GLOBAL_RTC: usize = 8;
 pub const GLOBAL_KBD: usize = 1;
+
+static TICKS_PER_MS: AtomicU32 = AtomicU32::new(0);
 
 pub struct LocalApic {
   addr: VirtAddr,
@@ -38,7 +45,9 @@ impl LocalApic {
   pub const TMRCURRCNT_OFFSET: u64 = 0x390;
   pub const TMRDIV_OFFSET: u64 = 0x3e0;
 
-  pub const TIMER_MODE_PERIODIC: u32 = 0x20000;
+  pub const TIMER_MODE_ONESHOT: u32 = 0b00 << 17;
+  pub const TIMER_MODE_PERIODIC: u32 = 0b01 << 17;
+  pub const TIMER_MODE_DEADLINE: u32 = 0b10 << 17;
 
   pub const LVT_INT_MASKED: u32 = 1 << 16;
   pub const LVT_INT_UNMASKED: u32 = 0 << 16;
@@ -81,40 +90,81 @@ impl LocalApic {
     Self { addr: LAPIC_ADDR }
   }
 
-  pub unsafe fn setup_timer_rtc(&self, rtc: &mut rtc::RTC) {
-    self.write(Self::TMRDIV_OFFSET, 0x3);
-    rtc.set_rate(6);
-
-    self.write(Self::TMRINITCNT_OFFSET, 0xffff_ffff);
-    rtc::TICKS_SINCE_BOOT.store(0, Ordering::Release);
-    while rtc::TICKS_SINCE_BOOT.load(Ordering::Acquire) < 512 {
-      x86_64::instructions::hlt();
-    }
-    self.write(Self::LVT_TIMER_OFFSET, Self::LVT_INT_MASKED);
-    let ticks_per_halfsec = 0xffff_ffff - self.read(Self::TMRCURRCNT_OFFSET);
-    serial_println!("ticks per halfsec: {:?}", ticks_per_halfsec);
-    let ticks_per_ms = ticks_per_halfsec / 500;
-    serial_println!("ticks per ms: {:?}", ticks_per_ms);
-
-    self.write(Self::LVT_TIMER_OFFSET, idt::IRQ_LAPIC_CLK as u32 | Self::TIMER_MODE_PERIODIC);
-    self.write(Self::TMRDIV_OFFSET, 0x3);
-    self.write(Self::TMRINITCNT_OFFSET, ticks_per_ms);
-  }
-
   pub unsafe fn setup_timer_pit(&self, pit: &mut pit::PIT) {
-    self.write(Self::TMRDIV_OFFSET, 0x3);
+    // divide by 8; see Intel Vol 3A 10.5.4
+    self.write(Self::TMRDIV_OFFSET, 0x2);
     self.write(Self::TMRINITCNT_OFFSET, 0xffff_ffff);
-    pit.sleep_us(10000);
+    pit.sleep_us(1_000);
     self.write(Self::LVT_TIMER_OFFSET, Self::LVT_INT_MASKED);
-    let ticks_per_10ms = 0xffff_ffff - self.read(Self::TMRCURRCNT_OFFSET);
-    self.write(Self::LVT_TIMER_OFFSET, idt::IRQ_LAPIC_CLK as u32 | Self::TIMER_MODE_PERIODIC);
-    self.write(Self::TMRDIV_OFFSET, 0x3);
-    self.write(Self::TMRINITCNT_OFFSET, ticks_per_10ms);
+    let ticks_per_ms = 0xffff_ffff - self.read(Self::TMRCURRCNT_OFFSET);
+    TICKS_PER_MS.store(ticks_per_ms, Ordering::Relaxed);
   }
 }
 
-pub extern "C" fn lapic_clk_interrupt() {
-  serial_print!(".");
+bitfield! {
+  #[repr(transparent)]
+  struct TimerFlags(u8);
+  impl Debug;
+
+  pub is_timing, set_timing: 0;
+}
+
+static IS_SLEEPING: AtomicBool = AtomicBool::new(false);
+
+// actually of type TimerFlags
+static TIMER_FLAGS: AtomicU8 = AtomicU8::new(0);
+
+pub unsafe fn sleep_local_us(us: u32) {
+  assert!(
+    IS_SLEEPING
+      .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+      .is_ok()
+  );
+  let mut lapic = unsafe { LocalApic::get() };
+  lapic.write(LocalApic::LVT_TIMER_OFFSET, LocalApic::LVT_INT_MASKED);
+
+  IS_SLEEPING.store(true, Ordering::Release);
+  TIMER_FLAGS.fetch_or(1, Ordering::Relaxed);
+
+  let ticks_per_ms = TICKS_PER_MS.load(Ordering::Relaxed);
+  // ensure the timer is set up properly
+  assert!(ticks_per_ms > 0);
+  // TODO: handle multi-sleeps, i.e. sleeps of longer than 2^32 - 1 ticks
+  lapic.write(
+    LocalApic::TMRINITCNT_OFFSET,
+    (ticks_per_ms / 1000) * us as u32,
+  );
+  lapic.write(
+    LocalApic::LVT_TIMER_OFFSET,
+    idt::IRQ_LAPIC_CLK as u32 | LocalApic::TIMER_MODE_ONESHOT,
+  );
+
+  while TIMER_FLAGS.load(Ordering::Acquire) & 0x1 != 0 {
+    x86_64::instructions::hlt();
+  }
+
+  IS_SLEEPING.store(false, Ordering::Release);
+}
+
+/// Eventually, this interrupt will trigger *something* to happen
+/// in the scheduler perhaps?
+#[unsafe(naked)]
+pub extern "C" fn lapic_clk_interrupt() -> ! {
+  unsafe {
+    core::arch::naked_asm! {
+      "push rax",
+      "mov al, {flags}",
+      "and al, {flags_done}",
+      "mov {flags}, al",
+      "mov rax, 0",
+      "movabs [{eoi}], rax",
+      "pop rax",
+      "iretq",
+      eoi = const vmem::LAPIC_EOI_ADDR.as_u64(),
+      flags_done = const !1u8,
+      flags = sym TIMER_FLAGS,
+    };
+  }
 }
 
 pub unsafe fn init_local(
@@ -259,15 +309,25 @@ impl IOApic {
     self.write(0x10 + index as u32 * 2 + 1, top_half);
   }
 
-  pub fn enable_pit(&mut self) -> pit::PIT {
-    let mut entry = self.get_entry(self.irqs[GLOBAL_PIT]);
-    entry.set_mask(false);
-    entry.set_vector(crate::idt::IRQ_PIT);
-    self.set_entry(self.irqs[GLOBAL_PIT], entry);
+  pub fn init_pit(&mut self) -> pit::PIT {
+    self.enable_pit();
 
     let mut pit = unsafe { pit::PIT::get() };
     pit.init();
     pit
+  }
+
+  pub fn enable_pit(&mut self) {
+    let mut entry = self.get_entry(self.irqs[GLOBAL_PIT]);
+    entry.set_mask(false);
+    entry.set_vector(crate::idt::IRQ_PIT);
+    self.set_entry(self.irqs[GLOBAL_PIT], entry);
+  }
+
+  pub fn disable_pit(&mut self) {
+    let mut entry = self.get_entry(self.irqs[GLOBAL_PIT]);
+    entry.set_mask(false);
+    self.set_entry(self.irqs[GLOBAL_PIT], entry);
   }
 
   pub fn enable_rtc(&mut self) -> rtc::RTC {

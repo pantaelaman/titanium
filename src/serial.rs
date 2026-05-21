@@ -10,6 +10,15 @@ lazy_static! {
   };
 }
 
+pub unsafe extern "C" fn debug_dot() {
+  use core::fmt::Write;
+
+  SERIAL1
+    .lock()
+    .write_char('.')
+    .expect("Printing to serial failed");
+}
+
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
   use core::fmt::Write;
