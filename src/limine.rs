@@ -7,7 +7,7 @@ mod memmap;
 
 pub use execaddrs::*;
 pub use memmap::*;
-use x86_64::VirtAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 #[repr(C, align(8))]
 struct RequestHeader {
@@ -51,7 +51,7 @@ impl RSDPRequest {
 #[repr(C)]
 struct RSDPResponse {
   header: ResponseHeader,
-  addr: VirtAddr,
+  addr: PhysAddr,
 }
 
 #[repr(C)]
@@ -242,10 +242,12 @@ pub fn framebuffers() -> Option<&'static [&'static Framebuffer]> {
   })
 }
 
+#[inline]
 pub fn hhdm_offset() -> u64 {
   unsafe { &*HHDM_REQUEST.header.response.cast::<HHDMResponse>() }.offset
 }
 
-pub fn rsdp_addr() -> VirtAddr {
+#[inline]
+pub fn rsdp_addr() -> PhysAddr {
   unsafe { &*RSDP_REQUEST.header.response.cast::<RSDPResponse>() }.addr
 }

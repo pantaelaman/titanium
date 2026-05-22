@@ -16,6 +16,7 @@ panic = "abort"
 
 [build-dependencies]
 cc = "1.2.60"
+bindgen = "0.72.1"
 
 [dependencies]
 acpi = { version = "6.1.1", default-features = false, features = ["alloc", "aml"] }

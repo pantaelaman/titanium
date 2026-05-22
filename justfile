@@ -1,5 +1,5 @@
 build:
-  cargo build -Zjson-target-spec --target target.json
+  cargo build
   make -C limine
 
   mkdir -p iso_root/boot

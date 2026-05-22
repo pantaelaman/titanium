@@ -1,5 +1,5 @@
+#![feature(cstr_display)]
 #![feature(generic_atomic)]
-#![feature(int_lowest_highest_one)]
 #![feature(abi_x86_interrupt)]
 #![feature(ptr_metadata)]
 #![feature(ptr_cast_array)]
@@ -26,6 +26,7 @@ use x86_64::{
   structures::paging::OffsetPageTable,
 };
 
+mod uacpi;
 mod acpi;
 mod executor;
 mod framebuffer;
