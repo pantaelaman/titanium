@@ -136,9 +136,7 @@ unsafe extern "C" fn kmain() -> ! {
     );
   }
 
-  let acpi_tables = unsafe { acpi::init_acpi() };
-
-  /*
+  let acpi_tables = unsafe { acpi::init() };
 
   let Some(madt_frame) = acpi_tables.find_table::<Madt>() else {
     panic!("no madt table found");
@@ -188,8 +186,6 @@ unsafe extern "C" fn kmain() -> ! {
   let interpreter =
     ::acpi::aml::Interpreter::new_from_platform(&acpi_platform).unwrap();
   let result = interpreter.evaluate(AmlName::root(), vec![]).unwrap();
-
-  */
 
   loop {
     x86_64::instructions::hlt();

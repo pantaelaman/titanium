@@ -1,5 +1,4 @@
 use core::{
-  marker::PhantomData,
   mem::MaybeUninit,
   ops::DerefMut,
   ptr::NonNull,
@@ -171,17 +170,4 @@ pub unsafe fn init() -> acpi::AcpiTables<&'static ACPIHandler> {
     )
     .unwrap()
   }
-}
-
-pub struct ACPI {
-  _private: PhantomData<()>,
-}
-
-use crate::uacpi;
-
-pub unsafe fn init_acpi() -> Option<ACPI> {
-  let status = unsafe { uacpi::uacpi_initialize(0) };
-  (status == uacpi::UACPI_STATUS_OK).then_some(ACPI {
-    _private: PhantomData,
-  })
 }
