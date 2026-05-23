@@ -2,9 +2,3 @@
 	path = limine
 	url = https://github.com/limine-bootloader/limine.git
 	branch = v11.x-binary
-[submodule "uacpi"]
-	path = uacpi
-	url = https://github.com/uACPI/uACPI.git
-[submodule "uacpi1"]
-	path = uacpi/uacpi
-	url = https://github.com/uACPI/uACPI.git
