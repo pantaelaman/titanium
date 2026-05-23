@@ -5,3 +5,6 @@
 [submodule "uacpi"]
 	path = uacpi
 	url = https://github.com/uACPI/uACPI.git
+[submodule "uacpi1"]
+	path = uacpi/uacpi
+	url = https://github.com/uACPI/uACPI.git

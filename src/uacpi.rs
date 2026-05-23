@@ -10,6 +10,7 @@ use spin::Mutex;
 use x86_64::{instructions::port::Port, registers::rflags::RFlags};
 
 use crate::serial_println;
+pub use uacpi::*;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn uacpi_kernel_get_rsdp(
@@ -439,5 +440,3 @@ pub unsafe extern "C" fn uacpi_kernel_schedule_work(
 pub unsafe extern "C" fn uacpi_kernel_wait_for_work_completion() -> uacpi_status {
   unimplemented!()
 }
-
-include!(concat!(env!("OUT_DIR"), "/uacpi_bindings.rs"));

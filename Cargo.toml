@@ -30,3 +30,4 @@ spin = "0.10.0"
 uart_16550 = "0.4.0"
 volatile = "0.6.1"
 x86_64 = { version = "0.15.4", features = ["instructions"] }
+uacpi = { path = "uacpi" }

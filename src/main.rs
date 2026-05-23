@@ -26,7 +26,7 @@ use x86_64::{
   structures::paging::OffsetPageTable,
 };
 
-pub mod uacpi;
+mod uacpi;
 mod acpi;
 mod executor;
 mod framebuffer;
