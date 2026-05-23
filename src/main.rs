@@ -40,6 +40,7 @@ mod vmem;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+  x86_64::instructions::interrupts::disable();
   serial_println!("--- PANIC! ---");
   serial_println!("{:#?}", info);
   loop {
