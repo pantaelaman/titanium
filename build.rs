@@ -12,6 +12,8 @@ fn main() {
     .use_core()
     .header("uacpi.h")
     .rust_target(RustTarget::nightly())
+    .prepend_enum_name(false)
+    .blocklist_file("uacpi/include/uacpi/internal/.*")
     .blocklist_function("uacpi_kernel_.*")
     .clang_arg("-Iuacpi/include")
     .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -38,6 +40,15 @@ fn main() {
             .then_some(entry.path())
         }),
     )
-    .flags(["-Iuacpi/include", "-Iinclude", "-nostdlib", "-pie", "-ffreestanding"])
+    .flags([
+      "-Iuacpi/include",
+      "-Iinclude",
+      "-nostdlib",
+      "-pie",
+      "-ffreestanding",
+      "-fno-stack-protector",
+    ])
     .compile(UACPI_LIB);
+
+  println!("cargo::rustc-link-lib=uacpi");
 }

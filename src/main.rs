@@ -26,7 +26,7 @@ use x86_64::{
   structures::paging::OffsetPageTable,
 };
 
-mod uacpi;
+pub mod uacpi;
 mod acpi;
 mod executor;
 mod framebuffer;
@@ -136,7 +136,9 @@ unsafe extern "C" fn kmain() -> ! {
     );
   }
 
-  let acpi_tables = unsafe { acpi::init() };
+  let acpi_tables = unsafe { acpi::init_acpi() };
+
+  /*
 
   let Some(madt_frame) = acpi_tables.find_table::<Madt>() else {
     panic!("no madt table found");
@@ -186,6 +188,8 @@ unsafe extern "C" fn kmain() -> ! {
   let interpreter =
     ::acpi::aml::Interpreter::new_from_platform(&acpi_platform).unwrap();
   let result = interpreter.evaluate(AmlName::root(), vec![]).unwrap();
+
+  */
 
   loop {
     x86_64::instructions::hlt();
