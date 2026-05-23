@@ -1,3 +1,5 @@
+#![feature(coroutines)]
+#![feature(iter_from_coroutine)]
 #![feature(cstr_display)]
 #![feature(generic_atomic)]
 #![feature(abi_x86_interrupt)]
@@ -11,13 +13,6 @@ extern crate alloc;
 
 use core::mem::MaybeUninit;
 
-use ::acpi::{
-  MadtError, aml::namespace::AmlName, platform::AcpiPlatform, sdt::{
-    SdtHeader,
-    hpet::HpetTable,
-    madt::{Madt, MadtEntry},
-  }
-};
 use alloc::vec;
 use crossbeam::epoch::Pointable;
 use spin::Mutex;
@@ -119,6 +114,11 @@ unsafe extern "C" fn kmain() -> ! {
     lapic
   };
 
+  let mut mapper = MapperAllocator {
+    mapper,
+    allocator: frame_allocator,
+  };
+
   if let Some(framebuffer) =
     crate::limine::framebuffers().and_then(|b| b.first())
   {
@@ -136,26 +136,18 @@ unsafe extern "C" fn kmain() -> ! {
     );
   }
 
-  let acpi_tables = unsafe { acpi::init() };
+  let uacpi_ctx = unsafe { acpi::init_acpi() }.unwrap();
+  let madt_handle = uacpi_ctx.madt();
+  let madt = madt_handle.as_ref();
+  serial_println!("MADT: {:?}", madt);
+  for entry in madt.entries() {
+    serial_println!("Entry: {:?}", entry);
+  }
 
-  let Some(madt_frame) = acpi_tables.find_table::<Madt>() else {
-    panic!("no madt table found");
-  };
-
-  let Some(hpet_frame) = acpi_tables.find_table::<HpetTable>() else {
-    panic!("no hpet table found");
-  };
-
-  let mut mapper = MapperAllocator {
-    mapper,
-    allocator: frame_allocator,
-  };
-
-  let mut ioapic = madt_frame
-    .get()
+  let mut ioapic = madt
     .entries()
     .find_map(|entry| {
-      if let MadtEntry::IoApic(entry) = entry {
+      if let acpi::madt::MADTEntry::IOApic(entry) = entry {
         Some(unsafe { hdint::IOApic::new(entry, &mut mapper) })
       } else {
         None
@@ -163,15 +155,10 @@ unsafe extern "C" fn kmain() -> ! {
     })
     .expect("no IOAPIC exists on this system");
 
-  for ovr in madt_frame.get().entries().filter_map(|entry| {
-    if let MadtEntry::InterruptSourceOverride(ovr) = entry {
-      Some(ovr)
-    } else {
-      None
+  for entry in madt.entries() {
+    if let acpi::madt::MADTEntry::IOApicOverride(entry) = entry {
+      ioapic.register_override(entry);
     }
-  }) {
-    serial_println!("IOAPIC Override: {:?}", ovr);
-    ioapic.override_irq(ovr.irq as usize, ovr.global_system_interrupt as usize);
   }
 
   let mut pit = ioapic.init_pit();
@@ -181,21 +168,7 @@ unsafe extern "C" fn kmain() -> ! {
   // don't need it after setting up the lapic's timer
   ioapic.disable_pit();
 
-  let acpi_platform =
-    AcpiPlatform::new(acpi_tables, &acpi::ACPIHandler {}).unwrap();
-  let interpreter =
-    ::acpi::aml::Interpreter::new_from_platform(&acpi_platform).unwrap();
-  let result = interpreter.evaluate(AmlName::root(), vec![]).unwrap();
-
   loop {
     x86_64::instructions::hlt();
   }
-}
-
-async fn test() {
-  async fn test_inner() -> usize {
-    return 10;
-  }
-
-  serial_println!("tested async: {}", test_inner().await);
 }

@@ -57,3 +57,43 @@ macro_rules! bitfield_volatile_bitrange {
     }
   }
 }
+
+#[macro_export]
+macro_rules! bitfield_cenum_bitrange {
+  (enum $name:ident($t:ty)) => {
+    impl ::bitfield::BitRange<$name> for $t {
+      fn bit_range(&self, msb: usize, lsb: usize) -> $name {
+        let width = msb - lsb + 1;
+        let mask = (1 << width) - 1;
+        unsafe { ::core::mem::transmute((self >> lsb) & mask) }
+      }
+    }
+
+    impl ::bitfield::BitRangeMut<$name> for $t {
+      fn set_bit_range(&mut self, msb: usize, lsb: usize, value: $name) {
+        let width = msb - lsb + 1;
+        let mask = ((1 << width) - 1) << lsb;
+        let val = unsafe { ::core::mem::transmute::<_, $t>(value) } << lsb;
+        *self = (*self & !mask) | (val & mask)
+      }
+    }
+  };
+  (enum $name:ident($t:ty => $trep:ty)) => {
+    impl ::bitfield::BitRange<$name> for $t {
+      fn bit_range(&self, msb: usize, lsb: usize) -> $name {
+        let width = msb - lsb + 1;
+        let mask = (1 << width) - 1;
+        unsafe { ::core::mem::transmute(((self >> lsb) & mask) as $trep) }
+      }
+    }
+
+    impl ::bitfield::BitRangeMut<$name> for $t {
+      fn set_bit_range(&mut self, msb: usize, lsb: usize, value: $name) {
+        let width = msb - lsb + 1;
+        let mask = ((1 << width) - 1) << lsb;
+        let val = unsafe { ::core::mem::transmute::<_, $trep>(value) as $t } << lsb;
+        *self = (*self & !mask) | (val & mask)
+      }
+    }
+  };
+}

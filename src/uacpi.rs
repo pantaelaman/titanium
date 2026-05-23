@@ -3,14 +3,17 @@
 #![allow(non_snake_case)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use core::{alloc::Layout, ffi::c_void, sync::atomic::{Atomic, Ordering}};
+use core::{
+  alloc::Layout,
+  ffi::c_void,
+  sync::atomic::{Atomic, Ordering},
+};
 
-use alloc::{boxed::Box};
+use alloc::boxed::Box;
 use spin::Mutex;
 use x86_64::{instructions::port::Port, registers::rflags::RFlags};
 
-use crate::serial_println;
-pub use uacpi::*;
+use crate::{serial_print, serial_println};
 
 include!(concat!(env!("OUT_DIR"), "/uacpi_bindings.rs"));
 
@@ -21,9 +24,9 @@ pub unsafe extern "C" fn uacpi_kernel_get_rsdp(
   out_rsdp_address: *mut uacpi_phys_addr,
 ) -> uacpi_status {
   unsafe {
-    out_rsdp_address.write(crate::limine::rsdp_addr().as_u64());
+    out_rsdp_address.write(crate::limine::rsdp_addr().as_u64() - crate::limine::hhdm_offset());
   };
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[doc = " Map a physical memory range starting at 'addr' with length 'len', and return\n a virtual address that can be used to access it.\n\n NOTE: 'addr' may be misaligned, in this case the host is expected to round it\n       down to the nearest page-aligned boundary and map that, while making\n       sure that at least 'len' bytes are still mapped starting at 'addr'. The\n       return value preserves the misaligned offset.\n\n       Example for uacpi_kernel_map(0x1ABC, 0xF00):\n           1. Round down the 'addr' we got to the nearest page boundary.\n              Considering a PAGE_SIZE of 4096 (or 0x1000), 0x1ABC rounded down\n              is 0x1000, offset within the page is 0x1ABC - 0x1000 => 0xABC\n           2. Requested 'len' is 0xF00 bytes, but we just rounded the address\n              down by 0xABC bytes, so add those on top. 0xF00 + 0xABC => 0x19BC\n           3. Round up the final 'len' to the nearest PAGE_SIZE boundary, in\n              this case 0x19BC is 0x2000 bytes (2 pages if PAGE_SIZE is 4096)\n           4. Call the VMM to map the aligned address 0x1000 (from step 1)\n              with length 0x2000 (from step 3). Let's assume the returned\n              virtual address for the mapping is 0xF000.\n           5. Add the original offset within page 0xABC (from step 1) to the\n              resulting virtual address 0xF000 + 0xABC => 0xFABC. Return it\n              to uACPI."]
@@ -43,99 +46,125 @@ pub unsafe extern "C" fn uacpi_kernel_unmap(
 ) {
 }
 
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn uacpi_kernel_log(
   arg1: uacpi_log_level,
   arg2: *const uacpi_char,
 ) {
-  serial_println!("{}", core::ffi::CStr::from_ptr(arg2).display());
+  serial_print!("[{}] {}", match arg1 {
+    UACPI_LOG_DEBUG => "DEBUG",
+    UACPI_LOG_ERROR => "ERROR",
+    UACPI_LOG_INFO => "INFO",
+    UACPI_LOG_TRACE => "TRACE",
+    UACPI_LOG_WARN => "WARN",
+    _ => "???"
+  }, core::ffi::CStr::from_ptr(arg2).display());
 }
 
-unsafe extern "C" {
-  #[doc = " Open a PCI device at 'address' for reading & writing.\n\n The device at 'address' might not actually exist on the system, in this case\n the api is allowed to return UACPI_STATUS_NOT_FOUND to indicate that, this\n error is handled gracefully by creating a dummy device internally that always\n returns 0xFF on reads and is no-op for writes. This is to support a common\n pattern in AML that probes for 0xFF reads to detect whether a device exists.\n\n The handle returned via 'out_handle' is used to perform IO on the\n configuration space of the device."]
-  pub fn uacpi_kernel_pci_device_open(
-    address: uacpi_pci_address,
-    out_handle: *mut uacpi_handle,
-  ) -> uacpi_status;
+#[doc = " Open a PCI device at 'address' for reading & writing.\n\n The device at 'address' might not actually exist on the system, in this case\n the api is allowed to return UACPI_STATUS_NOT_FOUND to indicate that, this\n error is handled gracefully by creating a dummy device internally that always\n returns 0xFF on reads and is no-op for writes. This is to support a common\n pattern in AML that probes for 0xFF reads to detect whether a device exists.\n\n The handle returned via 'out_handle' is used to perform IO on the\n configuration space of the device."]
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_device_open(
+  address: uacpi_pci_address,
+  out_handle: *mut uacpi_handle,
+) -> uacpi_status {
+  unimplemented!()
 }
-unsafe extern "C" {
-  pub fn uacpi_kernel_pci_device_close(arg1: uacpi_handle);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_device_close(arg1: uacpi_handle) {
+  unimplemented!()
 }
-unsafe extern "C" {
-  #[doc = " Read & write the configuration space of a previously open PCI device."]
-  pub fn uacpi_kernel_pci_read8(
-    device: uacpi_handle,
-    offset: uacpi_size,
-    value: *mut uacpi_u8,
-  ) -> uacpi_status;
+
+#[doc = " Read & write the configuration space of a previously open PCI device."]
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_read8(
+  device: uacpi_handle,
+  offset: uacpi_size,
+  value: *mut uacpi_u8,
+) -> uacpi_status {
+  unimplemented!()
 }
-unsafe extern "C" {
-  pub fn uacpi_kernel_pci_read16(
-    device: uacpi_handle,
-    offset: uacpi_size,
-    value: *mut uacpi_u16,
-  ) -> uacpi_status;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_read16(
+  device: uacpi_handle,
+  offset: uacpi_size,
+  value: *mut uacpi_u16,
+) -> uacpi_status {
+  unimplemented!()
 }
-unsafe extern "C" {
-  pub fn uacpi_kernel_pci_read32(
-    device: uacpi_handle,
-    offset: uacpi_size,
-    value: *mut uacpi_u32,
-  ) -> uacpi_status;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_read32(
+  device: uacpi_handle,
+  offset: uacpi_size,
+  value: *mut uacpi_u32,
+) -> uacpi_status {
+  unimplemented!()
 }
-unsafe extern "C" {
-  pub fn uacpi_kernel_pci_write8(
-    device: uacpi_handle,
-    offset: uacpi_size,
-    value: uacpi_u8,
-  ) -> uacpi_status;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_write8(
+  device: uacpi_handle,
+  offset: uacpi_size,
+  value: uacpi_u8,
+) -> uacpi_status {
+  unimplemented!()
 }
-unsafe extern "C" {
-  pub fn uacpi_kernel_pci_write16(
-    device: uacpi_handle,
-    offset: uacpi_size,
-    value: uacpi_u16,
-  ) -> uacpi_status;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_write16(
+  device: uacpi_handle,
+  offset: uacpi_size,
+  value: uacpi_u16,
+) -> uacpi_status {
+  unimplemented!()
 }
-unsafe extern "C" {
-  pub fn uacpi_kernel_pci_write32(
-    device: uacpi_handle,
-    offset: uacpi_size,
-    value: uacpi_u32,
-  ) -> uacpi_status;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn uacpi_kernel_pci_write32(
+  device: uacpi_handle,
+  offset: uacpi_size,
+  value: uacpi_u32,
+) -> uacpi_status {
+  unimplemented!()
 }
 
 //#[doc = " Map a SystemIO address at [base, base + len) and return a kernel-implemented\n handle that can be used for reading and writing the IO range.\n\n NOTE: The x86 architecture uses the in/out family of instructions\n       to access the SystemIO address space."]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn uacpi_kernel_io_map(
   base: uacpi_io_addr,
   len: uacpi_size,
   out_handle: *mut uacpi_handle,
 ) -> uacpi_status {
   unsafe {
-    out_handle.cast::<u32>().write(base as _);
+    out_handle.write(base as _);
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn uacpi_kernel_io_unmap(handle: uacpi_handle) {}
 
 #[doc = " Read/Write the IO range mapped via uacpi_kernel_io_map\n at a 0-based 'offset' within the range.\n\n NOTE:\n The x86 architecture uses the in/out family of instructions\n to access the SystemIO address space.\n\n You are NOT allowed to break e.g. a 4-byte access into four 1-byte accesses.\n Hardware ALWAYS expects accesses to be of the exact width."]
+#[unsafe(no_mangle)]
 pub fn uacpi_kernel_io_read8(
   arg1: uacpi_handle,
   offset: uacpi_size,
   out_value: *mut uacpi_u8,
 ) -> uacpi_status {
-  let port_num = unsafe { arg1.cast::<u32>().read() } as usize + offset;
+  let port_num = arg1 as usize + offset;
 
   if port_num > u16::MAX as usize {
-    return uacpi_status_UACPI_STATUS_INVALID_ARGUMENT;
+    return UACPI_STATUS_INVALID_ARGUMENT;
   }
 
   unsafe {
     out_value.write(Port::<u8>::new(port_num as u16).read());
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[unsafe(no_mangle)]
@@ -144,17 +173,17 @@ pub fn uacpi_kernel_io_read16(
   offset: uacpi_size,
   out_value: *mut uacpi_u16,
 ) -> uacpi_status {
-  let port_num = unsafe { arg1.cast::<u32>().read() } as usize + offset;
+  let port_num = arg1 as usize + offset;
 
   if port_num > u16::MAX as usize {
-    return uacpi_status_UACPI_STATUS_INVALID_ARGUMENT;
+    return UACPI_STATUS_INVALID_ARGUMENT;
   }
 
   unsafe {
     out_value.write(Port::<u16>::new(port_num as u16).read());
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[unsafe(no_mangle)]
@@ -163,17 +192,17 @@ pub fn uacpi_kernel_io_read32(
   offset: uacpi_size,
   out_value: *mut uacpi_u32,
 ) -> uacpi_status {
-  let port_num = unsafe { arg1.cast::<u32>().read() } as usize + offset;
+  let port_num = arg1 as usize + offset;
 
   if port_num > u16::MAX as usize {
-    return uacpi_status_UACPI_STATUS_INVALID_ARGUMENT;
+    return UACPI_STATUS_INVALID_ARGUMENT;
   }
 
   unsafe {
     out_value.write(Port::<u32>::new(port_num as u16).read());
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[unsafe(no_mangle)]
@@ -182,17 +211,17 @@ pub unsafe extern "C" fn uacpi_kernel_io_write8(
   offset: uacpi_size,
   in_value: uacpi_u8,
 ) -> uacpi_status {
-  let port_num = unsafe { arg1.cast::<u32>().read() } as usize + offset;
+  let port_num = arg1 as usize + offset;
 
   if port_num > u16::MAX as usize {
-    return uacpi_status_UACPI_STATUS_INVALID_ARGUMENT;
+    return UACPI_STATUS_INVALID_ARGUMENT;
   }
 
   unsafe {
     Port::<u8>::new(port_num as u16).write(in_value);
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[unsafe(no_mangle)]
@@ -201,17 +230,17 @@ pub unsafe extern "C" fn uacpi_kernel_io_write16(
   offset: uacpi_size,
   in_value: uacpi_u16,
 ) -> uacpi_status {
-  let port_num = unsafe { arg1.cast::<u32>().read() } as usize + offset;
+  let port_num = arg1 as usize + offset;
 
   if port_num > u16::MAX as usize {
-    return uacpi_status_UACPI_STATUS_INVALID_ARGUMENT;
+    return UACPI_STATUS_INVALID_ARGUMENT;
   }
 
   unsafe {
     Port::<u16>::new(port_num as u16).write(in_value);
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[unsafe(no_mangle)]
@@ -220,35 +249,41 @@ pub unsafe extern "C" fn uacpi_kernel_io_write32(
   offset: uacpi_size,
   in_value: uacpi_u32,
 ) -> uacpi_status {
-  let port_num = unsafe { arg1.cast::<u32>().read() } as usize + offset;
+  let port_num = arg1 as usize + offset;
 
   if port_num > u16::MAX as usize {
-    return uacpi_status_UACPI_STATUS_INVALID_ARGUMENT;
+    return UACPI_STATUS_INVALID_ARGUMENT;
   }
 
   unsafe {
     Port::<u32>::new(port_num as u16).write(in_value);
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[doc = " Allocate a block of memory of 'size' bytes.\n The contents of the allocated memory are unspecified."]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut ::core::ffi::c_void {
-  unimplemented!();
-  alloc::alloc::alloc(Layout::from_size_align_unchecked(size, 8)).cast()
+pub unsafe extern "C" fn uacpi_kernel_alloc(
+  size: uacpi_size,
+) -> *mut ::core::ffi::c_void {
+  let ptr: *mut u64 = alloc::alloc::alloc(Layout::from_size_align_unchecked(size + size_of::<u64>(), 8)).cast();
+  *ptr = size as u64;
+  ptr.byte_add(size_of::<u64>()).cast()
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn uacpi_kernel_free(mem: *mut ::core::ffi::c_void) {
-#[unsafe(no_mangle)]
-  unimplemented!();
+  let ptr: *mut u64 = mem.byte_sub(size_of::<u64>()).cast();
+  let size = *ptr as usize;
+  serial_println!("** UACPI requested deallocation of 0x{:016x}", ptr as usize);
+  alloc::alloc::dealloc(ptr.cast(), Layout::from_size_align_unchecked(size + size_of::<u64>(), 8));
 }
 
 #[doc = " Returns the number of nanosecond ticks elapsed since boot,\n strictly monotonic."]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64 {
+pub unsafe extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64
+{
   unimplemented!();
 }
 
@@ -294,7 +329,8 @@ pub unsafe extern "C" fn uacpi_kernel_get_thread_id() -> uacpi_thread_id {
 
 #[doc = " Disable interrupts and return an kernel-defined value representing the\n \"before\" state. This value is used in the subsequent call to restore the\n prior state.\n\n Note that this is talking about ALL interrupts on the current CPU, not just\n those installed by uACPI. This is typically achieved by executing the 'cli'\n instruction on x86, 'msr daifset, #3' on aarch64 etc."]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_disable_interrupts() -> uacpi_interrupt_state {
+pub unsafe extern "C" fn uacpi_kernel_disable_interrupts()
+-> uacpi_interrupt_state {
   let state = x86_64::registers::rflags::read();
 
   x86_64::instructions::interrupts::disable();
@@ -305,7 +341,10 @@ pub unsafe extern "C" fn uacpi_kernel_disable_interrupts() -> uacpi_interrupt_st
 #[doc = " Restore the state of the interrupt flags to the kernel-defined value provided\n in 'state'."]
 #[unsafe(no_mangle)]
 pub fn uacpi_kernel_restore_interrupts(state: uacpi_interrupt_state) {
-  if RFlags::from_bits(state).unwrap().contains(RFlags::INTERRUPT_FLAG) {
+  if RFlags::from_bits(state)
+    .unwrap()
+    .contains(RFlags::INTERRUPT_FLAG)
+  {
     x86_64::instructions::interrupts::enable();
   }
 }
@@ -317,8 +356,11 @@ pub unsafe extern "C" fn uacpi_kernel_acquire_mutex(
   arg2: uacpi_u16,
 ) -> uacpi_status {
   let mutex = unsafe { &*arg1.cast::<Atomic<bool>>() };
-  if mutex.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-    uacpi_status_UACPI_STATUS_OK
+  if mutex
+    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+    .is_ok()
+  {
+    UACPI_STATUS_OK
   } else {
     panic!("mutex already locked on single threaded code")
   }
@@ -337,9 +379,12 @@ pub unsafe extern "C" fn uacpi_kernel_wait_for_event(
   arg2: uacpi_u16,
 ) -> uacpi_bool {
   let semaphore = unsafe { &*arg1.cast::<Atomic<u16>>() };
-  if semaphore.try_update(Ordering::AcqRel, Ordering::Acquire, |v| {
-    (v > 0).then(|| v - 1)
-  }).is_ok() {
+  if semaphore
+    .try_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+      (v > 0).then(|| v - 1)
+    })
+    .is_ok()
+  {
     true
   } else {
     panic!("no event waiting on single threaded code");
@@ -367,12 +412,16 @@ pub unsafe extern "C" fn uacpi_kernel_handle_firmware_request(
 ) -> uacpi_status {
   let req = &*arg1;
   match req.type_ as u32 {
-    uacpi_firmware_request_type_UACPI_FIRMWARE_REQUEST_TYPE_BREAKPOINT => x86_64::instructions::interrupts::int3(),
-    uacpi_firmware_request_type_UACPI_FIRMWARE_REQUEST_TYPE_FATAL => panic!("fatal request"),
-    _ => unimplemented!()
+    uacpi_firmware_request_type_UACPI_FIRMWARE_REQUEST_TYPE_BREAKPOINT => {
+      x86_64::instructions::interrupts::int3()
+    }
+    uacpi_firmware_request_type_UACPI_FIRMWARE_REQUEST_TYPE_FATAL => {
+      panic!("fatal request")
+    }
+    _ => unimplemented!(),
   }
 
-  uacpi_status_UACPI_STATUS_OK
+  UACPI_STATUS_OK
 }
 
 #[doc = " Install an interrupt handler at 'irq', 'ctx' is passed to the provided\n handler for every invocation.\n\n 'out_irq_handle' is set to a kernel-implemented value that can be used to\n refer to this handler from other API."]
@@ -409,16 +458,23 @@ pub unsafe extern "C" fn uacpi_kernel_free_spinlock(arg1: uacpi_handle) {
 
 #[doc = " Lock/unlock helpers for spinlocks.\n\n These are expected to disable interrupts, returning the previous state of cpu\n flags, that can be used to possibly re-enable interrupts if they were enabled\n before.\n\n Note that lock is infalliable."]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_lock_spinlock(arg1: uacpi_handle) -> uacpi_cpu_flags {
+pub unsafe extern "C" fn uacpi_kernel_lock_spinlock(
+  arg1: uacpi_handle,
+) -> uacpi_cpu_flags {
   let flags = x86_64::registers::rflags::read();
 
   let spinlock = unsafe { &*arg1.cast::<Atomic<bool>>() };
   x86_64::instructions::interrupts::disable();
 
-  if spinlock.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+  if spinlock
+    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+    .is_ok()
+  {
     flags.bits()
   } else {
-    panic!("spinlock unable to be unlocked in single-threaded, uninterrupted code");
+    panic!(
+      "spinlock unable to be unlocked in single-threaded, uninterrupted code"
+    );
   }
 }
 
@@ -449,6 +505,7 @@ pub unsafe extern "C" fn uacpi_kernel_schedule_work(
 
 #[doc = " Waits for two types of work to finish:\n 1. All in-flight interrupts installed via uacpi_kernel_install_interrupt_handler\n 2. All work scheduled via uacpi_kernel_schedule_work\n\n Note that the waits must be done in this order specifically."]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_wait_for_work_completion() -> uacpi_status {
+pub unsafe extern "C" fn uacpi_kernel_wait_for_work_completion() -> uacpi_status
+{
   unimplemented!()
 }

@@ -3,20 +3,6 @@
 version = 4
 
 [[package]]
-name = "acpi"
-version = "6.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b763acdc1d85c36d61acf97a59938f23202d0e8efe45e8759de10c02db242744"
-dependencies = [
- "bit_field",
- "bitflags 2.11.0",
- "byteorder",
- "log",
- "pci_types",
- "spinning_top 0.3.0",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -115,12 +101,6 @@ name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
-
-[[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
@@ -292,7 +272,7 @@ version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b23ac50abb8261cb38c6e2a7192d3302e0836dac1628f6a93b82b4fad185897"
 dependencies = [
- "spinning_top 0.2.5",
+ "spinning_top",
 ]
 
 [[package]]
@@ -330,16 +310,6 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
-]
-
-[[package]]
-name = "pci_types"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0c2a105c657261a938ff68ee231c199a3d80eef33976004829de761ef5b1a9b"
-dependencies = [
- "bit_field",
- "bitflags 2.11.0",
 ]
 
 [[package]]
@@ -457,15 +427,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spinning_top"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d96d2d1d716fb500937168cc09353ffdc7a012be8475ac7308e1bdf0e3923300"
-dependencies = [
- "lock_api",
-]
-
-[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -500,7 +461,6 @@ dependencies = [
 name = "titanium-rune"
 version = "0.1.0"
 dependencies = [
- "acpi",
  "bindgen",
  "bitfield",
  "bitfields",
@@ -511,7 +471,6 @@ dependencies = [
  "limine",
  "linked_list_allocator",
  "spin 0.10.0",
- "uacpi",
  "uart_16550",
  "volatile 0.6.1",
  "x86_64",
@@ -522,14 +481,6 @@ name = "typenum"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
-
-[[package]]
-name = "uacpi"
-version = "0.1.0"
-dependencies = [
- "bindgen",
- "cc",
-]
 
 [[package]]
 name = "uart_16550"

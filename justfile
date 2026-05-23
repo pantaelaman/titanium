@@ -3,7 +3,7 @@ build:
   make -C limine
 
   mkdir -p iso_root/boot
-  cp -v target/target/debug/titanium-rune.elf iso_root/boot/rune
+  cp -v target/x86_64-unknown-none/debug/titanium-rune.elf iso_root/boot/rune
   mkdir -p iso_root/boot/limine
   cp -v limine.conf limine/limine-bios.sys limine/limine-bios-cd.bin \
         limine/limine-uefi-cd.bin iso_root/boot/limine/

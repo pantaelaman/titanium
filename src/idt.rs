@@ -348,10 +348,10 @@ pub fn init_interrupts() {
     handler_from_lapic!(crate::hdint::rtc::rtc_interrupt),
   );
 
-  idt.set_handler(
-    IRQ_HPET,
-    handler_from_lapic!(crate::hdint::hpet::hpet_interrupt),
-  );
+  //idt.set_handler(
+  //  IRQ_HPET,
+  //  handler_from_lapic!(crate::hdint::hpet::hpet_interrupt),
+  //);
 
   idt.load();
 

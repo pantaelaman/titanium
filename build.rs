@@ -9,6 +9,7 @@ pub fn main() {
     .header("uacpi.h")
     .rust_target(bindgen::RustTarget::nightly())
     .prepend_enum_name(false)
+    .disable_nested_struct_naming()
     .blocklist_file("uacpi/include/uacpi/internal/.*")
     .blocklist_function("uacpi_kernel_.*")
     .clang_arg("-Iuacpi/include")
@@ -43,6 +44,8 @@ pub fn main() {
       "-pie",
       "-ffreestanding",
       "-fno-stack-protector",
+      "-mgeneral-regs-only",
+      "-mno-red-zone",
     ])
     .compile(UACPI_LIB);
 }

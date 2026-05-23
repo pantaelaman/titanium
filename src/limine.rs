@@ -51,7 +51,7 @@ impl RSDPRequest {
 #[repr(C)]
 struct RSDPResponse {
   header: ResponseHeader,
-  addr: PhysAddr,
+  addr: VirtAddr,
 }
 
 #[repr(C)]
@@ -248,6 +248,6 @@ pub fn hhdm_offset() -> u64 {
 }
 
 #[inline]
-pub fn rsdp_addr() -> PhysAddr {
+pub fn rsdp_addr() -> VirtAddr {
   unsafe { &*RSDP_REQUEST.header.response.cast::<RSDPResponse>() }.addr
 }

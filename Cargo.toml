@@ -19,7 +19,6 @@ cc = "1.2.60"
 bindgen = "0.72.1"
 
 [dependencies]
-acpi = { version = "6.1.1", default-features = false, features = ["alloc", "aml"] }
 bitfield = "0.19.4"
 bitfields = "1.0.3"
 crossbeam = { version = "0.8.4", default-features = false, features = ["alloc", "nightly"] }
@@ -31,4 +30,3 @@ spin = "0.10.0"
 uart_16550 = "0.4.0"
 volatile = "0.6.1"
 x86_64 = { version = "0.15.4", features = ["instructions"] }
-uacpi = { path = "uacpi" }

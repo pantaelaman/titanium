@@ -20,7 +20,7 @@ use x86_64::{
 
 use crate::serial_println;
 
-pub mod hpet;
+//pub mod hpet;
 pub mod pit;
 pub mod rtc;
 
@@ -215,10 +215,10 @@ impl IOApic {
   pub const IOAPICARB: u32 = 2;
 
   pub unsafe fn new(
-    entry: &acpi::sdt::madt::IoApicEntry,
+    entry: &crate::acpi::madt::IOApicEntry,
     mapper: &mut MapperAllocator,
   ) -> Self {
-    let addr = PhysAddr::new(entry.io_apic_address as u64);
+    let addr = PhysAddr::new(entry.address as u64);
     const APIC_MAPPING_SIZE: u64 = 2 * size_of::<u32>() as u64;
 
     let start_frame = PhysFrame::<Size4KiB>::containing_address(addr);
@@ -248,7 +248,7 @@ impl IOApic {
           .unwrap_or_else(|e| {
             panic!(
               "couldn't map the page for IOAPIC {}: {e:?}",
-              entry.io_apic_id
+              entry.apic_id
             )
           })
           .flush();
@@ -260,8 +260,8 @@ impl IOApic {
 
     let mut ioapic = Self {
       base: vaddr,
-      id: entry.io_apic_id,
-      interrupt_base: entry.global_system_interrupt_base,
+      id: entry.apic_id,
+      interrupt_base: entry.gsi_base,
       irqs: [0; 32],
     };
 
@@ -273,8 +273,24 @@ impl IOApic {
     ioapic
   }
 
-  pub fn override_irq(&mut self, irq: usize, overridden: usize) {
-    self.irqs[irq] = overridden;
+  pub fn register_override(&mut self, ovr: &crate::acpi::madt::IOApicOverrideEntry) {
+    use crate::acpi::madt::{ApicIRQPolarity, ApicIRQTrigger};
+
+    self.irqs[ovr.gsi as usize] = ovr.irq_source as usize;
+    let mut redentry = self.get_entry(ovr.irq_source as usize);
+    match ovr.flags.polarity() {
+      ApicIRQPolarity::NoOverride => {},
+      ApicIRQPolarity::ActiveLo => redentry.set_active_low(true),
+      ApicIRQPolarity::ActiveHi => redentry.set_active_low(false),
+      ApicIRQPolarity::Reserved => unreachable!()
+    }
+    match ovr.flags.trigger() {
+      ApicIRQTrigger::NoOverride => {},
+      ApicIRQTrigger::Level => redentry.set_level_triggered(true),
+      ApicIRQTrigger::Edge => redentry.set_level_triggered(false),
+      ApicIRQTrigger::Reserved => unreachable!()
+    }
+    self.set_entry(ovr.irq_source as usize, redentry);
   }
 
   fn read(&self, reg: u32) -> u32 {
@@ -348,9 +364,6 @@ impl IOApic {
   }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RedirectionEntry(u64);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DeliveryMode {
@@ -362,12 +375,16 @@ pub enum DeliveryMode {
   External = 7,
 }
 
+crate::bitfield_cenum_bitrange!(enum DeliveryMode(u64 => u8));
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DestinationMode {
   Physical = 0,
   Logical = 1,
 }
+
+crate::bitfield_cenum_bitrange!(enum DestinationMode(u64 => u8));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -376,6 +393,8 @@ pub enum Polarity {
   ActiveLow = 1,
 }
 
+crate::bitfield_cenum_bitrange!(enum Polarity(u64 => u8));
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TriggerMode {
@@ -383,60 +402,21 @@ pub enum TriggerMode {
   Level = 1,
 }
 
-impl RedirectionEntry {
-  pub fn vector(&self) -> u8 {
-    (self.0 & 0xff) as u8
-  }
+crate::bitfield_cenum_bitrange!(enum TriggerMode(u64 => u8));
 
-  pub fn delivery_mode(&self) -> DeliveryMode {
-    unsafe { core::mem::transmute(((self.0 >> 8) & 0x3) as u8) }
-  }
+bitfield! {
+  #[derive(Clone, Copy, PartialEq, Eq)]
+  #[repr(transparent)]
+  pub struct RedirectionEntry(u64);
+  impl Debug;
 
-  // else is physical
-  pub fn destination_mode(&self) -> DestinationMode {
-    unsafe { core::mem::transmute(((self.0 >> 11) & 0x1) as u8) }
-  }
-
-  pub fn is_busy(&self) -> bool {
-    ((self.0 >> 12) & 0x1) != 0
-  }
-
-  pub fn polarity(&self) -> Polarity {
-    unsafe { core::mem::transmute(((self.0 >> 13) & 0x1) as u8) }
-  }
-
-  // else lapic sent EOI
-  pub fn is_received(&self) -> bool {
-    ((self.0 >> 14) & 0x1) != 0
-  }
-
-  pub fn trigger_mode(&self) -> TriggerMode {
-    unsafe { core::mem::transmute(((self.0 >> 15) & 0x1) as u8) }
-  }
-
-  pub fn is_masked(&self) -> bool {
-    ((self.0 >> 16) & 0x1) != 0
-  }
-
-  // not pictured: destination field
-
-  pub fn set_mask(&mut self, masked: bool) {
-    self.0 = (self.0 & !0x10000) | ((masked as u64) << 16);
-  }
-
-  pub fn set_delivery_mode(&mut self, mode: DeliveryMode) {
-    self.0 = (self.0 & !0x100) | ((mode as u8 as u64) << 8);
-  }
-
-  pub fn set_trigger_mode(&mut self, mode: TriggerMode) {
-    self.0 = (self.0 & !0x8000) | ((mode as u8 as u64) << 15);
-  }
-
-  pub fn set_polarity(&mut self, polarity: Polarity) {
-    self.0 = (self.0 & !0x2000) | ((polarity as u8 as u64) << 13);
-  }
-
-  pub fn set_vector(&mut self, vector: u8) {
-    self.0 = (self.0 & !0xff) | vector as u64;
-  }
+  pub u8, vector, set_vector : 7, 0;
+  pub DeliveryMode, delivery_mode, set_delivery_mode : 10, 8;
+  pub DestinationMode, destination_mode, set_destination_mode : 11;
+  pub is_waiting, _ : 12;
+  pub is_active_low, set_active_low: 13;
+  pub is_accepted, _ : 14;
+  pub is_level_triggered, set_level_triggered : 15;
+  pub is_masked, set_mask : 16;
+  pub u8, destination, set_destination : 63, 56;
 }

@@ -1,4 +1,3 @@
-use acpi::AcpiTables;
 use x86_64::VirtAddr;
 
 pub unsafe fn init(phys_offset: VirtAddr) {
