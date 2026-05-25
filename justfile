@@ -24,6 +24,6 @@ run:
   qemu-system-x86_64 -boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm
 
 run-debug:
-  qemu-system-x86_64 -s -S -boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm
+  qemu-system-x86_64 -s -S -no-reboot -no-shutdown -d int -boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm
 
 fresh: build run

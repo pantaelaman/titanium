@@ -53,6 +53,7 @@ pub enum MemmapType {
   ReservedMapped = 8,
 }
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct MemmapEntry {
   pub base: PhysAddr,

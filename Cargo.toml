@@ -21,6 +21,8 @@ bindgen = "0.72.1"
 [dependencies]
 bitfield = "0.19.4"
 bitfields = "1.0.3"
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc", "atomic"] }
+const_for = "0.1.5"
 crossbeam = { version = "0.8.4", default-features = false, features = ["alloc", "nightly"] }
 fixed = "1.31.0"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }

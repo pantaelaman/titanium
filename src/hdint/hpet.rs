@@ -107,7 +107,7 @@ impl HPET {
             | PageTableFlags::WRITE_THROUGH
             | PageTableFlags::NO_CACHE
             | PageTableFlags::NO_EXECUTE,
-          &mut mapper.allocator,
+          mapper.allocator,
         )
         .unwrap()
         .flush();

@@ -243,7 +243,7 @@ impl IOApic {
               | PageTableFlags::NO_EXECUTE
               | PageTableFlags::WRITE_THROUGH
               | PageTableFlags::WRITABLE,
-            &mut mapper.allocator,
+            mapper.allocator,
           )
           .unwrap_or_else(|e| {
             panic!(

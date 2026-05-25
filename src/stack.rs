@@ -13,6 +13,7 @@ pub struct StackManager {
   stacks: [[PhysFrame; crate::vmem::PAGES_PER_STACK]; NUM_STACKS],
 }
 
+/*
 pub fn init(mapper: &mut MapperAllocator) -> StackManager {
   const NUM_PREALLOC_FRAMES: usize =
     crate::vmem::PAGES_PER_STACK * NUM_STACKS;
@@ -50,3 +51,4 @@ pub fn init(mapper: &mut MapperAllocator) -> StackManager {
     stacks: unsafe { core::mem::transmute(frames) },
   }
 }
+*/

@@ -1,3 +1,4 @@
+#![feature(int_roundings)]
 #![feature(coroutines)]
 #![feature(iter_from_coroutine)]
 #![feature(cstr_display)]
@@ -54,7 +55,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 pub struct MapperAllocator<'a> {
   pub mapper: OffsetPageTable<'a>,
-  pub allocator: paging::RuneFrameAllocator<'a>,
+  pub allocator: &'a mut paging::RuneFrameAllocator,
 }
 
 impl<'a> MapperAllocator<'a> {
@@ -66,7 +67,7 @@ impl<'a> MapperAllocator<'a> {
     flags: PageTableFlags,
   ) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
     unsafe {
-      self.mapper.map_to(page, phys_frame, flags, &mut self.allocator)
+      self.mapper.map_to(page, phys_frame, flags, self.allocator)
     }
   }
 }
@@ -85,6 +86,8 @@ unsafe extern "C" fn kmain() -> ! {
     gdt::init();
   }
 
+  idt::init_interrupts();
+
   let memmap_entries =
     limine::memmap_entries().expect("couldn't load memmap entries");
   serial_println!("Entry count: {}", memmap_entries.len());
@@ -96,8 +99,6 @@ unsafe extern "C" fn kmain() -> ! {
       entry.ty
     );
   }
-
-  idt::init_interrupts();
 
   // pretty sure I don't need this now that I have a custom target
   // this would be to enable legacy SSE instructions
@@ -122,12 +123,12 @@ unsafe extern "C" fn kmain() -> ! {
   }
 
   let mut mapper = unsafe { paging::init(hhdm_offset) };
-  let mut frame_allocator = paging::RuneFrameAllocator::new(memmap_entries);
+  let frame_allocator = paging::RuneFrameAllocator::new(memmap_entries);
 
   let lapic = unsafe {
-    let lapic = hdint::init_local(&mut mapper, &mut frame_allocator);
+    let lapic = hdint::init_local(&mut mapper, frame_allocator);
 
-    heap::init(&mut mapper, &mut frame_allocator)
+    heap::init(&mut mapper, frame_allocator)
       .expect("couldn't initialise the heap");
 
     lapic
