@@ -13,19 +13,20 @@ lazy_static! {
 pub unsafe extern "C" fn debug_dot() {
   use core::fmt::Write;
 
-  SERIAL1
-    .lock()
-    .write_char('.')
-    .expect("Printing to serial failed");
+  if let Some(mut lock) = SERIAL1.try_lock() {
+    lock.write_char('.').expect("Printing to serial failed");
+  }
 }
 
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
+  x86_64::instructions::interrupts::disable();
   use core::fmt::Write;
   SERIAL1
     .lock()
     .write_fmt(args)
     .expect("Printing to serial failed");
+  x86_64::instructions::interrupts::enable();
 }
 
 #[macro_export]

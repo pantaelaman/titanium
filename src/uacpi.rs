@@ -284,7 +284,7 @@ pub unsafe extern "C" fn uacpi_kernel_free(mem: *mut ::core::ffi::c_void) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64
 {
-  unimplemented!();
+  crate::sys::get_ns()
 }
 
 #[doc = " Spin for N microseconds."]

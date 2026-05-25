@@ -18,6 +18,7 @@ use x86_64::{
 use crate::{paging, serial_println, uacpi};
 
 pub mod madt;
+pub mod hpet;
 
 pub struct UACPIContext {
   _private: core::marker::PhantomData<()>,
@@ -34,6 +35,23 @@ struct Header {
   oem_revision: u32,
   creator_id: u32,
   creator_revision: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AddressSpace {
+  Memory = 0,
+  IO = 1,
+}
+
+#[derive(Debug)]
+#[repr(C, packed(1))]
+pub struct Address {
+  pub address_space: AddressSpace,
+  pub reg_bit_width: u8,
+  pub reg_bit_offset: u8,
+  _reserved: u8,
+  pub address: PhysAddr,
 }
 
 impl core::fmt::Debug for Header {
@@ -68,6 +86,21 @@ impl UACPIContext {
     }
 
     madt::MADTHandle {
+      table: unsafe { table.assume_init() },
+    }
+  }
+
+  pub fn hpet(&self) -> hpet::HPETHandle {
+    let mut table: MaybeUninit<uacpi::uacpi_table> = MaybeUninit::uninit();
+
+    unsafe {
+      uacpi::uacpi_table_find_by_signature(
+        uacpi::ACPI_HPET_SIGNATURE.as_ptr().cast(),
+        table.as_mut_ptr(),
+      );
+    }
+
+    hpet::HPETHandle {
       table: unsafe { table.assume_init() },
     }
   }

@@ -55,6 +55,11 @@ impl<'m> RuneFrameAllocator<'m> {
       })
       .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
   }
+
+  pub fn allocate_many_frames(&mut self, n_frames: usize) -> impl Iterator<Item = PhysFrame> {
+    self.next += n_frames;
+    self.usable_frames().skip(self.next - n_frames).take(n_frames)
+  }
 }
 
 unsafe impl<'m> FrameAllocator<Size4KiB> for RuneFrameAllocator<'m> {

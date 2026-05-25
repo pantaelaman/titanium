@@ -181,7 +181,7 @@ impl MADT {
 }
 
 pub struct MADTHandle {
-  pub table: uacpi::uacpi_table,
+  pub(super) table: uacpi::uacpi_table,
 }
 
 impl MADTHandle {

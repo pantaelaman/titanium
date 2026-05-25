@@ -11,6 +11,14 @@ pub const LAPIC_EOI_ADDR: VirtAddr = VirtAddr::new(LAPIC_ADDR.as_u64() + crate::
 pub const HEAP_START: VirtAddr = VirtAddr::new_truncate(0x_1000_0000_0000);
 pub const HEAP_SIZE: u64 = 0x100_0000;
 
+// one page above and below the stack for protection are also included
+pub const STACK_TOP_GUARD: VirtAddr = VirtAddr::new_truncate(0x_1800_0002_0000);
+pub const STACK_TOP: VirtAddr = VirtAddr::new_truncate(0x_1800_0001_f000);
+pub const STACK_BOT: VirtAddr = VirtAddr::new_truncate(0x_1800_0000_1000);
+pub const STACK_BOT_GUARD: VirtAddr = VirtAddr::new_truncate(0x_1800_0000_0000);
+pub const PAGES_PER_STACK: usize = 14;
+pub const PAGE_SIZE: u64 = 0x1000;
+
 pub const APIC_START: VirtAddr = VirtAddr::new_truncate(0x_beef_0000_0000);
 pub const APIC_SIZE: u64 = 0x_0001_0000_0000;
 pub static APIC_NEXT_OFFSET: AtomicU64 = AtomicU64::new(0);

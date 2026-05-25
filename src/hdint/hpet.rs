@@ -1,22 +1,23 @@
-use acpi::sdt::hpet::HpetTable;
 use bitfield::bitfield;
 use x86_64::{
   PhysAddr, VirtAddr,
   structures::paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
 };
 
-use crate::{MapperAllocator, bitfield_volatile_bitrange, serial_print, serial_println, vmem::HPET_ADDR};
+use crate::{
+  MapperAllocator, bitfield_volatile_bitrange, serial_print, serial_println,
+  vmem::HPET_ADDR,
+};
 
+#[derive(Debug)]
 pub struct HPET {
   addr: VirtAddr,
-  minimal_tick: u16,
 }
 
 bitfield! {
   #[derive(Clone, Copy, PartialEq, Eq)]
   #[repr(transparent)]
   pub struct Capabilities(u64);
-  no default BitRange;
   impl Debug;
 
   pub u32, period_fs, _ : 63, 32;
@@ -27,25 +28,19 @@ bitfield! {
   pub u8, rev_id, _ : 7, 0;
 }
 
-crate::bitfield_volatile_bitrange!(struct Capabilities(u64));
-
 bitfield! {
   #[derive(Clone, Copy, PartialEq, Eq)]
   #[repr(transparent)]
   pub struct Configuration(u64);
-  no default BitRange;
   impl Debug;
 
   pub is_legrep_enabled, set_legrep_enabled : 1;
   pub is_enabled, set_enabled : 0;
 }
 
-crate::bitfield_volatile_bitrange!(struct Configuration(u64));
-
 bitfield! {
   #[repr(transparent)]
   pub struct TimerConfig(u64);
-  no default BitRange;
   impl Debug;
 
   pub u32, irq_capabilities, _ : 63, 32;
@@ -61,8 +56,6 @@ bitfield! {
   pub is_level, set_level : 1;
 }
 
-crate::bitfield_volatile_bitrange!(struct TimerConfig(u64));
-
 #[repr(C)]
 pub struct HPETTimer {
   pub config: TimerConfig,
@@ -74,9 +67,7 @@ pub struct HPETTimer {
 impl HPETTimer {
   #[inline]
   pub fn comparator(&self) -> u64 {
-    unsafe {
-      (&self.comparator as *const u64).read_volatile()
-    }
+    unsafe { (&self.comparator as *const u64).read_volatile() }
   }
 
   #[inline]
@@ -96,10 +87,15 @@ impl HPET {
   /// Offset to first timer configuration
   const TIMER_BASE_OFFSET: u64 = 0x100;
 
-  pub fn new(table: &HpetTable, mapper: &mut MapperAllocator) -> Self {
+  pub fn new(
+    table: &crate::acpi::hpet::HPET,
+    mapper: &mut MapperAllocator,
+  ) -> Self {
+    assert!(table.address.address_space == crate::acpi::AddressSpace::Memory);
     let frame: PhysFrame<Size4KiB> =
-      PhysFrame::from_start_address(PhysAddr::new(table.base_address.address)).unwrap();
-    let page = Page::containing_address(HPET_ADDR);
+      PhysFrame::from_start_address(table.address.address).unwrap();
+    let page = Page::from_start_address(crate::vmem::HPET_ADDR).unwrap();
+
     unsafe {
       mapper
         .mapper
@@ -107,8 +103,8 @@ impl HPET {
           page,
           frame,
           PageTableFlags::PRESENT
-            | PageTableFlags::WRITE_THROUGH
             | PageTableFlags::WRITABLE
+            | PageTableFlags::WRITE_THROUGH
             | PageTableFlags::NO_CACHE
             | PageTableFlags::NO_EXECUTE,
           &mut mapper.allocator,
@@ -117,16 +113,23 @@ impl HPET {
         .flush();
     }
 
+    Self { addr: page.start_address() }
+  }
+
+  // directly gets the HPET from its assigned virtual address
+  // this assumes that the HPET has been initialised before
+  pub unsafe fn get() -> Self {
     Self {
-      addr: page.start_address(),
-      minimal_tick: table.clock_tick_unit,
+      addr: crate::vmem::HPET_ADDR,
     }
   }
 
   #[inline]
-  pub fn capabilities(&self) -> &Capabilities {
+  pub fn capabilities(&self) -> Capabilities {
     unsafe {
-      &*(self.addr + Self::CAPABILITIES_OFFSET).as_ptr::<Capabilities>()
+      (self.addr + Self::CAPABILITIES_OFFSET)
+        .as_ptr::<Capabilities>()
+        .read_volatile()
     }
   }
 
@@ -140,30 +143,46 @@ impl HPET {
   #[inline]
   fn timer_mut(&mut self, index: u8) -> &mut HPETTimer {
     unsafe {
-      &mut *(self.addr + Self::TIMER_BASE_OFFSET + 0x20 * index as u64).as_mut_ptr()
+      &mut *(self.addr + Self::TIMER_BASE_OFFSET + 0x20 * index as u64)
+        .as_mut_ptr()
     }
   }
 
   #[inline]
   pub fn counter(&self) -> u64 {
     unsafe {
-      (self.addr + Self::MC_VALUE_OFFSET).as_ptr::<u64>().read_volatile()
+      (self.addr + Self::MC_VALUE_OFFSET)
+        .as_ptr::<u64>()
+        .read_volatile()
     }
   }
 
   #[inline]
   pub fn interrupt_status(&self) -> u32 {
     let reg = unsafe {
-      (self.addr + Self::INTERRUPT_STATUS_OFFSET).as_ptr::<u64>().read_volatile()
+      (self.addr + Self::INTERRUPT_STATUS_OFFSET)
+        .as_ptr::<u64>()
+        .read_volatile()
     };
 
     (reg & 0xffff_ffff) as u32
   }
 
   #[inline]
-  fn configuration(&mut self) -> &mut Configuration {
+  fn configuration(&self) -> Configuration {
     unsafe {
-      &mut *(self.addr + Self::CONFIGURATION_OFFSET).as_mut_ptr()
+      (self.addr + Self::CONFIGURATION_OFFSET)
+        .as_ptr::<Configuration>()
+        .read_volatile()
+    }
+  }
+
+  #[inline]
+  fn set_configuration(&mut self, configuration: Configuration) {
+    unsafe {
+      (self.addr + Self::CONFIGURATION_OFFSET)
+        .as_mut_ptr::<Configuration>()
+        .write_volatile(configuration);
     }
   }
 
@@ -172,36 +191,79 @@ impl HPET {
   /// expected behaviour elsewhere, hence the unsafety.
   /// This function will panic if `on_irq` does not match an available
   /// irq for the timer.
-  pub unsafe fn enable_timer(&mut self, index: u8, on_irq: u8, period_fs: u64) {
+  pub unsafe fn enable_timer(&mut self, index: u8, on_irq: u8, period_ns: u64) {
     // disable interrupts while configuring timers
-    self.configuration().set_enabled(false);
+    self.disable();
+
+    let clk_period_fs = self.capabilities().period_fs() as u64;
+
+    let period_ticks = (period_ns * 1_000_000) / clk_period_fs;
 
     let curcount = self.counter();
     let irq_bit = 1 << on_irq;
     let timer = self.timer_mut(index);
 
     // ensure that we can enable on this irq
-    assert!(timer.config.irq_capabilities() & irq_bit != 0);
-    timer.config.set_active_irq(on_irq);
-    timer.config.set_irq_enabled(true);
-    timer.config.set_periodic(true);
-    timer.config.set_cnf(true);
+
+    let mut timer_config =
+      unsafe { core::ptr::addr_of!(timer.config).read_volatile() };
+    serial_println!("Timer config: {:?}", timer_config);
+    assert!(timer_config.irq_capabilities() & irq_bit != 0);
+    timer_config.set_active_irq(on_irq);
+    timer_config.set_irq_enabled(true);
+    timer_config.set_periodic(true);
+    timer_config.set_cnf(true);
+
+    unsafe {
+      core::ptr::addr_of_mut!(timer.config).write_volatile(timer_config);
+    }
+
     // set initial count activation thanks to `set_cnf`
-    timer.set_comparator(curcount.wrapping_add(period_fs));
+    timer.set_comparator(curcount.wrapping_add(period_ticks));
     // set additional count activation (normal behaviour)
-    timer.set_comparator(period_fs);
+    timer.set_comparator(period_ticks);
+  }
+
+  pub fn disable_timer(&mut self, index: u8) {
+    let timer = self.timer_mut(index);
+    let mut timer_config = unsafe { core::ptr::addr_of!(timer.config).read_volatile() };
+    timer_config.set_irq_enabled(false);
+    unsafe {
+      core::ptr::addr_of_mut!(timer.config).write_volatile(timer_config);
+    }
   }
 
   pub unsafe fn enable(&mut self) {
-    // enable interrupts
-    self.configuration().set_enabled(true);
+    let mut config = self.configuration();
+    config.set_enabled(true);
+    self.set_configuration(config);
   }
 
   pub fn disable(&mut self) {
-    self.configuration().set_enabled(false);
+    let mut config = self.configuration();
+    config.set_enabled(false);
+    self.set_configuration(config);
+  }
+
+  pub fn get_counter(&self) -> u64 {
+    unsafe {
+      (self.addr + Self::MC_VALUE_OFFSET)
+        .as_ptr::<u64>()
+        .read_volatile()
+    }
   }
 }
 
+pub unsafe fn get_ns() -> u64 {
+  let hpet = unsafe { HPET::get() };
+  let clk_period_fs = hpet.capabilities().period_fs();
+  let clk_period_ns = clk_period_fs / 1_000_000;
+  hpet.get_counter() * clk_period_ns as u64
+}
+
 pub extern "C" fn hpet_interrupt() {
-  serial_print!(".");
+  //serial_print!(".");
+  unsafe {
+    crate::serial::debug_dot();
+  }
 }

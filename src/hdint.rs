@@ -20,7 +20,7 @@ use x86_64::{
 
 use crate::serial_println;
 
-//pub mod hpet;
+pub mod hpet;
 pub mod pit;
 pub mod rtc;
 
@@ -276,8 +276,8 @@ impl IOApic {
   pub fn register_override(&mut self, ovr: &crate::acpi::madt::IOApicOverrideEntry) {
     use crate::acpi::madt::{ApicIRQPolarity, ApicIRQTrigger};
 
-    self.irqs[ovr.gsi as usize] = ovr.irq_source as usize;
-    let mut redentry = self.get_entry(ovr.irq_source as usize);
+    self.irqs[ovr.irq_source as usize] = ovr.gsi as usize;
+    let mut redentry = self.get_entry(ovr.gsi as usize);
     match ovr.flags.polarity() {
       ApicIRQPolarity::NoOverride => {},
       ApicIRQPolarity::ActiveLo => redentry.set_active_low(true),
@@ -290,7 +290,7 @@ impl IOApic {
       ApicIRQTrigger::Edge => redentry.set_level_triggered(false),
       ApicIRQTrigger::Reserved => unreachable!()
     }
-    self.set_entry(ovr.irq_source as usize, redentry);
+    self.set_entry(ovr.gsi as usize, redentry);
   }
 
   fn read(&self, reg: u32) -> u32 {
@@ -335,6 +335,7 @@ impl IOApic {
 
   pub fn enable_pit(&mut self) {
     let mut entry = self.get_entry(self.irqs[GLOBAL_PIT]);
+    serial_println!("pit entry ({}) on {}", GLOBAL_PIT, self.irqs[GLOBAL_PIT]);
     entry.set_mask(false);
     entry.set_vector(crate::idt::IRQ_PIT);
     self.set_entry(self.irqs[GLOBAL_PIT], entry);
@@ -356,11 +357,24 @@ impl IOApic {
     rtc
   }
 
-  pub fn enable_hpet(&mut self, on_irq: usize) {
+  pub fn init_hpet(&mut self, table: &crate::acpi::hpet::HPET, mapper: &mut MapperAllocator) -> hpet::HPET {
+    let mut hpet = hpet::HPET::new(table, mapper);
+    serial_println!("HPET Table: {:?}", table);
+    serial_println!("HPET: {:?}", hpet);
+
+    hpet.disable();
+
+    let timer = hpet.timer(0);
+    let on_irq = timer.config.irq_capabilities().lowest_one().expect("HPET has no irq abilities") as usize;
+
     let mut entry = self.get_entry(self.irqs[on_irq]);
-    entry.set_mask(false);
+    entry.set_mask(true);
     entry.set_vector(crate::idt::IRQ_HPET);
     self.set_entry(self.irqs[on_irq], entry);
+
+    hpet.disable_timer(0);
+
+    hpet
   }
 }
 

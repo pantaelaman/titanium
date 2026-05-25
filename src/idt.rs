@@ -1,5 +1,6 @@
 use core::mem::MaybeUninit;
 
+use bitfield::bitfield;
 use x86_64::{
   VirtAddr,
   registers::{
@@ -197,9 +198,25 @@ extern "C" fn breakpoint_handler(stack_frame: *const InterruptStackFrame) {
   serial_println!("{:#?}", stack_frame);
 }
 
+bitfield! {
+  #[derive(Clone, Copy, PartialEq, Eq)]
+  #[repr(transparent)]
+  struct PageFaultErrorCode(u64);
+  impl Debug;
+
+  pub is_present, _ : 0;
+  pub is_write_access, _ : 1;
+  pub in_user_ring, _ : 2;
+  pub is_reserved_write, _ : 3;
+  pub is_instruction_fetch, _ : 4;
+  pub is_protection_key_violation, _ : 5;
+  pub is_shadow_stack_access, _ : 6;
+  pub is_sgx_violation, _ : 15;
+}
+
 extern "C" fn page_fault_handler(
   stack_frame: *const InterruptStackFrame,
-  ec: u64,
+  ec: PageFaultErrorCode,
 ) -> ! {
   let stack_frame = unsafe { &*stack_frame };
   serial_println!("=== PAGE FAULT ===");
@@ -207,7 +224,7 @@ extern "C" fn page_fault_handler(
     "Accessed Address: {:?}",
     x86_64::registers::control::Cr2::read()
   );
-  serial_println!("EC: {}", ec);
+  serial_println!("EC: {:?}", ec);
   serial_println!("{:#?}", stack_frame);
 
   loop {
@@ -348,10 +365,10 @@ pub fn init_interrupts() {
     handler_from_lapic!(crate::hdint::rtc::rtc_interrupt),
   );
 
-  //idt.set_handler(
-  //  IRQ_HPET,
-  //  handler_from_lapic!(crate::hdint::hpet::hpet_interrupt),
-  //);
+  idt.set_handler(
+    IRQ_HPET,
+    handler_from_lapic!(crate::hdint::hpet::hpet_interrupt),
+  );
 
   idt.load();
 

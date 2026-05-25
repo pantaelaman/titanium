@@ -17,13 +17,14 @@ use alloc::vec;
 use crossbeam::epoch::Pointable;
 use spin::Mutex;
 use x86_64::{
-  PhysAddr, VirtAddr, registers::control::Cr4Flags,
-  structures::paging::OffsetPageTable,
+  PhysAddr, VirtAddr,
+  registers::control::Cr4Flags,
+  structures::paging::{
+    Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB, mapper::{MapToError, MapperFlush}
+  },
 };
 
-mod uacpi;
 mod acpi;
-mod executor;
 mod framebuffer;
 mod gdt;
 mod hdconf;
@@ -33,8 +34,11 @@ mod idt;
 mod limine;
 mod paging;
 mod queue;
+mod scheduler;
 mod serial;
+mod stack;
 mod sys;
+mod uacpi;
 mod util;
 mod vmem;
 
@@ -51,6 +55,20 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 pub struct MapperAllocator<'a> {
   pub mapper: OffsetPageTable<'a>,
   pub allocator: paging::RuneFrameAllocator<'a>,
+}
+
+impl<'a> MapperAllocator<'a> {
+  #[inline]
+  pub unsafe fn map_to(
+    &mut self,
+    page: Page,
+    phys_frame: PhysFrame,
+    flags: PageTableFlags,
+  ) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
+    unsafe {
+      self.mapper.map_to(page, phys_frame, flags, &mut self.allocator)
+    }
+  }
 }
 
 #[unsafe(no_mangle)]
@@ -168,6 +186,26 @@ unsafe extern "C" fn kmain() -> ! {
   }
   // don't need it after setting up the lapic's timer
   ioapic.disable_pit();
+
+  serial_println!("before seeking the hpet");
+  let mut hpet = {
+    let hpet_handle = uacpi_ctx.hpet();
+    let hpet = hpet_handle.as_ref();
+    ioapic.init_hpet(hpet, &mut mapper)
+  };
+  unsafe {
+    hpet.enable();
+  }
+
+  for i in 0..10 {
+    sys::sleep_local_us(1_000_000);
+    serial_println!("hpet counter at: {:?}", hpet.get_counter());
+  }
+
+  //for _ in 0..10 {
+  //  serial_println!("hpet at: {:?}", hpet.get_counter());
+  //  sys::sleep_local_us(1_000);
+  //}
 
   loop {
     x86_64::instructions::hlt();
