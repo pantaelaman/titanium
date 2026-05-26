@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use spin::Mutex;
 use uart_16550::SerialPort;
+use x86_64::registers::rflags::RFlags;
 
 lazy_static! {
   pub static ref SERIAL1: Mutex<SerialPort> = {
@@ -21,12 +22,15 @@ pub unsafe extern "C" fn debug_dot() {
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
   x86_64::instructions::interrupts::disable();
+  let reenable = x86_64::registers::rflags::read().contains(RFlags::INTERRUPT_FLAG);
   use core::fmt::Write;
   SERIAL1
     .lock()
     .write_fmt(args)
     .expect("Printing to serial failed");
-  x86_64::instructions::interrupts::enable();
+  if reenable {
+    x86_64::instructions::interrupts::enable();
+  }
 }
 
 #[macro_export]

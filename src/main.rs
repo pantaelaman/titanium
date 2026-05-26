@@ -176,16 +176,6 @@ unsafe extern "C" fn kmain() -> ! {
     hpet.enable();
   }
 
-  for i in 0..10 {
-    sys::sleep_local_us(1_000_000);
-    serial_println!("hpet counter at: {:?}", hpet.get_counter());
-  }
-
-  //for _ in 0..10 {
-  //  serial_println!("hpet at: {:?}", hpet.get_counter());
-  //  sys::sleep_local_us(1_000);
-  //}
-
   loop {
     x86_64::instructions::hlt();
   }
