@@ -168,8 +168,7 @@ pub extern "C" fn lapic_clk_interrupt() -> ! {
 }
 
 pub unsafe fn init_local(
-  mapper: &mut impl Mapper<Size4KiB>,
-  frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+  mapper: &mut MapperAllocator
 ) -> LocalApic {
   let (apic_phys_frame, _) =
     x86_64::registers::model_specific::ApicBase::read();
@@ -185,7 +184,6 @@ pub unsafe fn init_local(
           | PageTableFlags::WRITABLE
           | PageTableFlags::NO_CACHE
           | PageTableFlags::WRITE_THROUGH,
-        frame_allocator,
       )
       .expect("couldn't map the LAPIC page")
       .flush();

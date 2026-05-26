@@ -53,24 +53,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
   }
 }
 
-pub struct MapperAllocator<'a> {
-  pub mapper: OffsetPageTable<'a>,
-  pub allocator: &'a mut paging::RuneFrameAllocator,
-}
-
-impl<'a> MapperAllocator<'a> {
-  #[inline]
-  pub unsafe fn map_to(
-    &mut self,
-    page: Page,
-    phys_frame: PhysFrame,
-    flags: PageTableFlags,
-  ) -> Result<MapperFlush<Size4KiB>, MapToError<Size4KiB>> {
-    unsafe {
-      self.mapper.map_to(page, phys_frame, flags, self.allocator)
-    }
-  }
-}
+pub use paging::MapperAllocator;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
@@ -125,19 +108,14 @@ unsafe extern "C" fn kmain() -> ! {
   let mut mapper = unsafe { paging::init(hhdm_offset) };
   let frame_allocator = paging::RuneFrameAllocator::new(memmap_entries);
 
-  let lapic = unsafe {
-    let lapic = hdint::init_local(&mut mapper, frame_allocator);
-
-    heap::init(&mut mapper, frame_allocator)
-      .expect("couldn't initialise the heap");
-
-    lapic
-  };
-
   let mut mapper = MapperAllocator {
     mapper,
     allocator: frame_allocator,
   };
+
+  unsafe { heap::init(&mut mapper) };
+
+  let lapic = unsafe { hdint::init_local(&mut mapper) };
 
   if let Some(framebuffer) =
     crate::limine::framebuffers().and_then(|b| b.first())

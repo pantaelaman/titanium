@@ -2,13 +2,17 @@ use core::ptr::NonNull;
 
 use alloc::alloc::{GlobalAlloc, Layout};
 
+use crate::{
+  MapperAllocator, serial_println,
+  vmem::{HEAP_SIZE, HEAP_START},
+};
 use x86_64::{
   VirtAddr,
   structures::paging::{
-    FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size2MiB, Size4KiB, mapper::MapToError
+    FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size2MiB,
+    Size4KiB, mapper::MapToError,
   },
 };
-use crate::{serial_println, vmem::{HEAP_SIZE, HEAP_START}};
 
 pub mod ll;
 
@@ -16,31 +20,16 @@ pub mod ll;
 static ALLOCATOR: Locked<FixedSizeBlockAllocator> =
   Locked::new(FixedSizeBlockAllocator::new());
 
-pub unsafe fn init(
-  mapper: &mut impl Mapper<Size2MiB>,
-  frame_allocator: &mut (impl FrameAllocator<Size2MiB> + FrameAllocator<Size4KiB>),
-) -> Result<(), MapToError<Size2MiB>> {
-  let page_range = {
-    let heap_end = HEAP_START + HEAP_SIZE;
-    let heap_start_page = Page::containing_address(HEAP_START);
-    let heap_end_page = Page::containing_address(heap_end - 1);
-
-    Page::range_inclusive(heap_start_page, heap_end_page)
-  };
-
-  serial_println!("!! heap will use {} 2MiB huge pages", page_range.len());
-
-  for page in page_range {
-    let frame: PhysFrame<Size2MiB> = frame_allocator
-      .allocate_frame()
-      .ok_or(MapToError::FrameAllocationFailed)?;
-    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-    unsafe { mapper.map_to(page, frame, flags, frame_allocator)?.flush() };
-  }
+pub unsafe fn init(mapper: &mut MapperAllocator) {
+  mapper.page_region::<Size2MiB>(
+    HEAP_START,
+    HEAP_START + HEAP_SIZE,
+    PageTableFlags::PRESENT
+      | PageTableFlags::WRITABLE
+      | crate::vmem::PAGE_FLAG_HEAP,
+  ).expect("could not map heap, not enough memory");
 
   unsafe { ALLOCATOR.inner.lock().init(HEAP_START, HEAP_SIZE) };
-
-  Ok(())
 }
 
 const BLOCK_SIZES: &[usize] = &[8, 16, 32, 64, 128, 256, 512, 1024, 2048];

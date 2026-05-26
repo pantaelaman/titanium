@@ -14,9 +14,11 @@ use x86_64::{
 };
 
 use crate::{
-  limine::{MemmapEntry, MemmapType},
-  serial_println,
+  limine::{MemmapEntry, MemmapType}, serial_print, serial_println
 };
+
+mod mapall;
+pub use mapall::*;
 
 pub unsafe fn active_l4_page_table(
   phys_offset: VirtAddr,
@@ -97,8 +99,15 @@ impl RuneFrameAllocator {
   /// Converts an address into a *relative* index for the given level
   /// This will silently round down misaligned addresses
   #[inline]
-  fn addr_to_index(addr: PhysAddr, level: usize) -> usize {
+  fn addr_to_relative_index(addr: PhysAddr, level: usize) -> usize {
     (addr.as_u64() / crate::vmem::PAGE_SIZE) as usize >> level
+  }
+
+  /// Converts an address into an absolute index
+  /// This will silently round down misaligned addresses
+  #[inline]
+  fn addr_to_index(addr: PhysAddr, level: usize) -> usize {
+    Self::relative_to_absolute((Self::addr_to_relative_index(addr, level), level))
   }
 
   /// Converts a level 0 index to the physical address of the start of its 4 page chunk
@@ -192,7 +201,7 @@ impl RuneFrameAllocator {
     }
   }
 
-  fn allocate_frame_from_level(
+  fn allocate_chunk_from_level(
     &mut self,
     min_level: usize,
   ) -> Option<PhysAddr> {
@@ -226,7 +235,7 @@ impl RuneFrameAllocator {
     self.buddy_bytes.set(i + LEVEL_OFFSETS[min_level], false);
 
     let addr = Self::relative_index_to_addr((i, min_level));
-    serial_println!("+++ allocated addr {:?} on level {}", addr, min_level);
+    //serial_println!("+++ allocated addr {:?} on level {}", addr, min_level);
     Some(addr)
   }
 
@@ -252,13 +261,73 @@ impl RuneFrameAllocator {
       self.buddy_bytes.set(i, true);
     }
   }
+
+  // Attempts to map the largest number of contiguous physical frames in the range min_frames..=n_frames
+  // Returns the address of the start of the mapped chunk and the number of frames mapped
+  fn pick_off_contiguous(&mut self, n_frames: usize, min_frames: usize) -> Option<(PhysAddr, usize)> {
+    let aligned_n = n_frames.next_power_of_two();
+    let target_level = aligned_n.lowest_one().unwrap() as usize;
+    let minimum_level = min_frames.next_power_of_two().lowest_one().unwrap() as usize;
+
+    serial_println!("=== PICKING CONTIGUOUS ({} requested, unit {})", n_frames, min_frames);
+    serial_println!("    : aligned {}, target {}, min {}", aligned_n, target_level, minimum_level);
+
+
+    let (frame_addr, level) = 'addr: {
+      for level in (minimum_level..=target_level).rev() {
+        if let Some(addr) = self.allocate_chunk_from_level(target_level) {
+          break 'addr (addr, level);
+        }
+      }
+
+      return None;
+    };
+
+    serial_println!("    : fit level {}", level);
+
+    let rel_index = Self::addr_to_relative_index(frame_addr, level);
+    // mark the mapped frame as used
+    self.buddy_bytes.set(Self::relative_to_absolute((rel_index, level)), false);
+
+    let n_mapped = 1usize << level;
+    let mut overflow = n_mapped.saturating_sub(n_frames);
+
+    serial_println!("    : mapped {} with {} overflow", n_mapped, overflow);
+
+    // index past the end of the most recently used chunk
+    let mut overbound_index = rel_index + 1;
+    let mut overbound_level = level;
+    // conveniently since each level maps a new power of two,
+    // we can just iterate backwards from the highest levels to the smallest levels
+    // by iterating from the highest bits to the lowest bits of the number of overflow frames
+    // overflow is guaranteed to be less than aligned_n
+    while let Some(level) = overflow.highest_one() {
+      let level = level as usize;
+
+      // unset this bit
+      overflow &= !(1 << level);
+
+      // set it to the next chunk of level `level` underneath the index on the overbound level
+      // semantically, the shift is "widening" the index to fit level `level`
+      // each level's indices are twice as big as the level above them
+      overbound_index = (overbound_index << (overbound_level - level)) - 1;
+      // after this, the new overbound index is at level `level`
+      overbound_level = level;
+      let abs_i = Self::relative_to_absolute((overbound_index, level));
+      // mark the unused chunk as usable!
+      self.buddy_bytes.set(abs_i, true);
+    }
+
+    serial_println!("    : marked as {} mapped", n_mapped.min(n_frames));
+    Some((frame_addr, n_mapped.min(n_frames)))
+  }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for RuneFrameAllocator {
   #[inline]
   fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
     self
-      .allocate_frame_from_level(0)
+      .allocate_chunk_from_level(0)
       .map(|addr| unsafe { PhysFrame::from_start_address_unchecked(addr) })
   }
 }
@@ -267,7 +336,7 @@ unsafe impl FrameAllocator<Size2MiB> for RuneFrameAllocator {
   #[inline]
   fn allocate_frame(&mut self) -> Option<PhysFrame<Size2MiB>> {
     self
-      .allocate_frame_from_level(LEVEL_2MIB)
+      .allocate_chunk_from_level(LEVEL_2MIB)
       .map(|addr| unsafe { PhysFrame::from_start_address_unchecked(addr) })
   }
 }
@@ -275,7 +344,7 @@ unsafe impl FrameAllocator<Size2MiB> for RuneFrameAllocator {
 impl FrameDeallocator<Size4KiB> for RuneFrameAllocator {
   #[inline]
   unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
-    let index = Self::addr_to_index(frame.start_address(), 0);
+    let index = Self::addr_to_relative_index(frame.start_address(), 0);
     self.buddy_bytes.set(index, true);
     self.merge_up_from((index, 0));
   }
@@ -284,7 +353,7 @@ impl FrameDeallocator<Size4KiB> for RuneFrameAllocator {
 impl FrameDeallocator<Size2MiB> for RuneFrameAllocator {
   #[inline]
   unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size2MiB>) {
-    let index = Self::addr_to_index(frame.start_address(), LEVEL_2MIB);
+    let index = Self::addr_to_relative_index(frame.start_address(), LEVEL_2MIB);
     self.buddy_bytes.set(index, true);
     self.merge_up_from((index, LEVEL_2MIB));
   }
