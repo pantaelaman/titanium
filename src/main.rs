@@ -1,3 +1,4 @@
+#![feature(atomic_ptr_null)]
 #![feature(int_roundings)]
 #![feature(coroutines)]
 #![feature(iter_from_coroutine)]
@@ -15,18 +16,22 @@ extern crate alloc;
 use core::mem::MaybeUninit;
 
 use alloc::vec;
+use bitfield::Bit;
 use crossbeam::epoch::Pointable;
 use spin::Mutex;
 use x86_64::{
   PhysAddr, VirtAddr,
   registers::control::Cr4Flags,
   structures::paging::{
-    Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB, mapper::{MapToError, MapperFlush}
+    Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB,
+    mapper::{MapToError, MapperFlush},
   },
 };
 
 mod acpi;
 mod framebuffer;
+#[cfg(feature = "fred")]
+mod fred;
 mod gdt;
 mod hdconf;
 mod hdint;
@@ -60,16 +65,33 @@ unsafe extern "C" fn kmain() -> ! {
   assert!(limine::is_base_revision_supported());
   assert!(limine::paging_mode() == limine::PagingMode::L4);
 
-  let hhdm_offset = VirtAddr::new(limine::hhdm_offset());
-
-  serial_println!("Welcome to Rune!");
-  serial_println!("HHDM offset: {:?}", hhdm_offset);
-
+  let supports_fred: bool;
   unsafe {
-    gdt::init();
+    let cpuflags: u32;
+    core::arch::asm! {
+      "mov eax, 0x7",
+      "mov ecx, 0x1",
+      "cpuid",
+      lateout("eax") cpuflags,
+    }
+    supports_fred = cpuflags.bit(17);
   }
 
-  idt::init_interrupts();
+  serial_println!("Supports FRED: {}", supports_fred);
+
+  unsafe {
+    vmem::init();
+    // GDT -> IDT is an enforced ordering
+    gdt::init();
+    idt::init();
+
+    #[cfg(feature = "fred")]
+    fred::init();
+  }
+
+  let hhdm_offset = crate::limine::hhdm_offset();
+  serial_println!("Welcome to Rune!");
+  serial_println!("HHDM offset: {:?}", hhdm_offset);
 
   let memmap_entries =
     limine::memmap_entries().expect("couldn't load memmap entries");
@@ -91,21 +113,7 @@ unsafe extern "C" fn kmain() -> ! {
   //   });
   // }
 
-  serial_println!(
-    "are interrupts enabled? {}",
-    x86_64::instructions::interrupts::are_enabled()
-  );
-
-  let l4_page_table = unsafe { paging::active_l4_page_table(hhdm_offset) };
-  for (i, entry) in l4_page_table
-    .iter()
-    .enumerate()
-    .filter(|(_, entry)| !entry.is_unused())
-  {
-    serial_println!("Page {}: {:?}", i, entry);
-  }
-
-  let mut mapper = unsafe { paging::init(hhdm_offset) };
+  let mut mapper = unsafe { paging::init() };
   let frame_allocator = paging::RuneFrameAllocator::new(memmap_entries);
 
   let mut mapper = MapperAllocator {
@@ -166,6 +174,8 @@ unsafe extern "C" fn kmain() -> ! {
   // don't need it after setting up the lapic's timer
   ioapic.disable_pit();
 
+  sys::sleep_local_us(3_000_000);
+
   serial_println!("before seeking the hpet");
   let mut hpet = {
     let hpet_handle = uacpi_ctx.hpet();
@@ -176,7 +186,44 @@ unsafe extern "C" fn kmain() -> ! {
     hpet.enable();
   }
 
+  stack::init(&mut mapper);
+
+  unsafe {
+    scheduler::init(mapper);
+    scheduler::spawn_task(
+      greedy_task,
+      scheduler::TaskConfig::small_kernel(),
+      0,
+      None,
+    );
+    scheduler::spawn_task(
+      coop_task,
+      scheduler::TaskConfig::small_kernel(),
+      0,
+      None,
+    );
+    scheduler::jump_to_scheduler();
+  }
+
   loop {
     x86_64::instructions::hlt();
+  }
+}
+
+fn greedy_task() {
+  serial_println!("greedy running");
+
+  loop {
+    x86_64::instructions::hlt();
+    serial_println!("resumed after preemption");
+  }
+}
+
+fn coop_task() {
+  serial_println!("coop running");
+
+  loop {
+    scheduler::yield_task();
+    serial_println!("resumed after yielding");
   }
 }

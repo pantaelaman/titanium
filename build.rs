@@ -48,4 +48,10 @@ pub fn main() {
       "-mno-red-zone",
     ])
     .compile(UACPI_LIB);
+
+  #[cfg(feature = "fred")]
+  {
+    const FRED_STUBS: &str = "fred";
+    cc::Build::new().files(["fred.s"]).compile(FRED_STUBS);
+  }
 }

@@ -29,6 +29,8 @@ pub unsafe fn init(mapper: &mut MapperAllocator) {
       | crate::vmem::PAGE_FLAG_HEAP,
   ).expect("could not map heap, not enough memory");
 
+  x86_64::instructions::tlb::flush_all();
+
   unsafe { ALLOCATOR.inner.lock().init(HEAP_START, HEAP_SIZE) };
 }
 

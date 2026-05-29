@@ -84,7 +84,7 @@ impl Entry {
   }
 }
 
-type HandlerFn = extern "C" fn() -> !;
+type HandlerFn = unsafe extern "C" fn() -> !;
 
 macro_rules! handler {
   ($name:ident) => {{
@@ -319,7 +319,24 @@ impl InterruptDescriptorTable {
 
 static mut IDT: MaybeUninit<InterruptDescriptorTable> = MaybeUninit::uninit();
 
-pub fn init_interrupts() {
+pub unsafe fn load_handler(irq: u8, handler: HandlerFn, trapping: bool) {
+  assert!(irq > 31);
+
+  let reenable = x86_64::instructions::interrupts::are_enabled();
+  x86_64::instructions::interrupts::disable();
+  let mut idt = unsafe {
+    #[allow(static_mut_refs)]
+    IDT.assume_init_mut()
+  };
+
+  idt.set_handler(irq, handler).with_trap(trapping);
+
+  if reenable {
+    x86_64::instructions::interrupts::enable();
+  }
+}
+
+pub unsafe fn init() {
   let idt = unsafe {
     #[allow(static_mut_refs)]
     IDT.write(InterruptDescriptorTable::new())
@@ -350,15 +367,9 @@ pub fn init_interrupts() {
     .set_handler(14, handler_with_ec!(page_fault_handler))
     .with_trap(true);
 
-  idt.set_handler(
-    IRQ_LAPIC_CLK,
-    crate::hdint::lapic_clk_interrupt,
-  );
+  idt.set_handler(IRQ_LAPIC_CLK, crate::hdint::lapic_clk_interrupt);
 
-  idt.set_handler(
-    IRQ_PIT,
-    crate::hdint::pit::pit_interrupt,
-  );
+  idt.set_handler(IRQ_PIT, crate::hdint::pit::pit_interrupt);
 
   idt.set_handler(
     IRQ_RTC,

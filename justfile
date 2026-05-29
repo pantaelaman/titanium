@@ -1,3 +1,5 @@
+QEMU_FLAGS := "-boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm"
+
 build:
   cargo build
   make -C limine
@@ -21,9 +23,9 @@ build:
   ./limine/limine bios-install image.iso
 
 run:
-  qemu-system-x86_64 -boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm
+  qemu-system-x86_64 {{QEMU_FLAGS}}
 
 run-debug:
-  qemu-system-x86_64 -s -S -no-reboot -no-shutdown -d int -boot d -cdrom image.iso -m 8G -serial stdio -enable-kvm
+  qemu-system-x86_64 -s -S {{QEMU_FLAGS}}
 
 fresh: build run

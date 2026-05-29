@@ -33,11 +33,11 @@ impl_cast! {
 macro_rules! bitfield_volatile_bitrange {
   (struct $name:ident($t:ty)) => {
     impl<T> ::bitfield::BitRange<T> for $name
-    where $t: crate::util::Cast<T> {
+    where
+      $t: crate::util::Cast<T>,
+    {
       fn bit_range(&self, msb: usize, lsb: usize) -> T {
-        let value = unsafe {
-          ::core::ptr::read_volatile(&self.0 as *const $t)
-        };
+        let value = unsafe { ::core::ptr::read_volatile(&self.0 as *const $t) };
 
         let width = msb - lsb + 1;
         let mask = (1 << width) - 1;
@@ -51,11 +51,14 @@ macro_rules! bitfield_volatile_bitrange {
         let mask = ((1 << width) - 1) << lsb;
         let old_value = self.0;
         unsafe {
-          ::core::ptr::write_volatile(&mut self.0 as *mut $t, (old_value & !mask) | (crate::util::Cast::cast(value) & mask))
+          ::core::ptr::write_volatile(
+            &mut self.0 as *mut $t,
+            (old_value & !mask) | (crate::util::Cast::cast(value) & mask),
+          )
         }
       }
     }
-  }
+  };
 }
 
 #[macro_export]
@@ -91,8 +94,31 @@ macro_rules! bitfield_cenum_bitrange {
       fn set_bit_range(&mut self, msb: usize, lsb: usize, value: $name) {
         let width = msb - lsb + 1;
         let mask = ((1 << width) - 1) << lsb;
-        let val = unsafe { ::core::mem::transmute::<_, $trep>(value) as $t } << lsb;
+        let val =
+          unsafe { ::core::mem::transmute::<_, $trep>(value) as $t } << lsb;
         *self = (*self & !mask) | (val & mask)
+      }
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! bitfield_bitflags_bitrange {
+  (struct $name:ident($t:ty)) => {
+    impl ::bitfield::BitRange<$name> for $t {
+      fn bit_range(&self, msb: usize, lsb: usize) -> $name {
+        let width = msb - lsb + 1;
+        let mask = ((1 << width) - 1) << lsb;
+        <$name as ::bitflags::Flags>::from_bits_truncate(self & mask)
+      }
+    }
+
+    impl ::bitfield::BitRangeMut<$name> for $t {
+      fn set_bit_range(&mut self, msb: usize, lsb: usize, value: $name) {
+        let width = msb - lsb + 1;
+        let mask = ((1 << width) + 1) << lsb;
+        let added = <$name as ::bitflags::Flags>::known_bits(&value) & mask;
+        *self = (*self & !mask) | added;
       }
     }
   };

@@ -34,7 +34,8 @@ pub unsafe fn active_l4_page_table(
   unsafe { &mut *ptr }
 }
 
-pub unsafe fn init(phys_offset: VirtAddr) -> OffsetPageTable<'static> {
+pub unsafe fn init() -> OffsetPageTable<'static> {
+  let phys_offset = *crate::vmem::HHDM_ADDR;
   unsafe {
     let l4_page_table = active_l4_page_table(phys_offset);
     OffsetPageTable::new(l4_page_table, phys_offset)
@@ -42,7 +43,7 @@ pub unsafe fn init(phys_offset: VirtAddr) -> OffsetPageTable<'static> {
 }
 
 // 128 GiB
-const MAX_PHYS_MAP: u64 = 0x20_0000_0000;
+pub const MAX_PHYS_MAP: u64 = 0x20_0000_0000;
 const MAX_PHYS_MAP_PAGES: u64 = MAX_PHYS_MAP / crate::vmem::PAGE_SIZE;
 /// Lowest level of the buddy allocator allocates in 4 page chunks
 const MAX_BUDDY_BITS: usize = MAX_PHYS_MAP_PAGES as usize;

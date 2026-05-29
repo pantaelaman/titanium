@@ -24,7 +24,7 @@ pub unsafe extern "C" fn uacpi_kernel_get_rsdp(
   out_rsdp_address: *mut uacpi_phys_addr,
 ) -> uacpi_status {
   unsafe {
-    out_rsdp_address.write(crate::limine::rsdp_addr().as_u64() - crate::limine::hhdm_offset());
+    out_rsdp_address.write(crate::vmem::RSDP_ADDR.as_u64());
   };
   UACPI_STATUS_OK
 }

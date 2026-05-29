@@ -99,6 +99,37 @@ impl LocalApic {
     let ticks_per_ms = 0xffff_ffff - self.read(Self::TMRCURRCNT_OFFSET);
     TICKS_PER_MS.store(ticks_per_ms, Ordering::Relaxed);
   }
+
+  /// Stops the timer.
+  pub fn halt_timer(&mut self) {
+    self.write(
+      Self::LVT_TIMER_OFFSET,
+      Self::TIMER_MODE_ONESHOT | Self::LVT_INT_MASKED,
+    );
+    self.write(Self::TMRINITCNT_OFFSET, 0);
+  }
+}
+
+#[inline]
+pub unsafe fn halt_timer() {
+  let mut lapic = unsafe { LocalApic::get() };
+  lapic.halt_timer();
+}
+
+/// Initiates the counter to interrupt in `us` microseconds
+pub unsafe fn trigger_local_us(us: u32) {
+  let mut lapic = unsafe { LocalApic::get() };
+  lapic.write(LocalApic::LVT_TIMER_OFFSET, LocalApic::LVT_INT_MASKED);
+
+  let ticks_per_ms = TICKS_PER_MS.load(Ordering::Relaxed);
+  assert!(ticks_per_ms > 0);
+  let ticks = (ticks_per_ms / 1000) * us as u32;
+
+  lapic.write(LocalApic::TMRINITCNT_OFFSET, ticks);
+  lapic.write(
+    LocalApic::LVT_TIMER_OFFSET,
+    idt::IRQ_LAPIC_CLK as u32 | LocalApic::TIMER_MODE_ONESHOT,
+  )
 }
 
 bitfield! {
@@ -114,6 +145,8 @@ static IS_SLEEPING: AtomicBool = AtomicBool::new(false);
 // actually of type TimerFlags
 static TIMER_FLAGS: AtomicU8 = AtomicU8::new(0);
 
+/// Safety: this function will only do what you expect it to
+/// prior to switching into the scheduler
 pub unsafe fn sleep_local_us(us: u32) {
   assert!(
     IS_SLEEPING
@@ -148,28 +181,26 @@ pub unsafe fn sleep_local_us(us: u32) {
 
 /// Eventually, this interrupt will trigger *something* to happen
 /// in the scheduler perhaps?
+/// scratch that, this interrupt will be overridden once we switch
+/// to the scheduler's context
 #[unsafe(naked)]
 pub extern "C" fn lapic_clk_interrupt() -> ! {
   unsafe {
     core::arch::naked_asm! {
       "push rax",
-      "mov al, {flags}",
-      "and al, {flags_done}",
-      "mov {flags}, al",
+      "lock and byte ptr {flags}, {flag_done_mask}",
       "mov rax, 0",
       "movabs [{eoi}], rax",
       "pop rax",
       "iretq",
       eoi = const vmem::LAPIC_EOI_ADDR.as_u64(),
-      flags_done = const !1u8,
+      flag_done_mask = const !0x1,
       flags = sym TIMER_FLAGS,
     };
   }
 }
 
-pub unsafe fn init_local(
-  mapper: &mut MapperAllocator
-) -> LocalApic {
+pub unsafe fn init_local(mapper: &mut MapperAllocator) -> LocalApic {
   let (apic_phys_frame, _) =
     x86_64::registers::model_specific::ApicBase::read();
 
@@ -244,10 +275,7 @@ impl IOApic {
             mapper.allocator,
           )
           .unwrap_or_else(|e| {
-            panic!(
-              "couldn't map the page for IOAPIC {}: {e:?}",
-              entry.apic_id
-            )
+            panic!("couldn't map the page for IOAPIC {}: {e:?}", entry.apic_id)
           })
           .flush();
       }
@@ -271,22 +299,25 @@ impl IOApic {
     ioapic
   }
 
-  pub fn register_override(&mut self, ovr: &crate::acpi::madt::IOApicOverrideEntry) {
+  pub fn register_override(
+    &mut self,
+    ovr: &crate::acpi::madt::IOApicOverrideEntry,
+  ) {
     use crate::acpi::madt::{ApicIRQPolarity, ApicIRQTrigger};
 
     self.irqs[ovr.irq_source as usize] = ovr.gsi as usize;
     let mut redentry = self.get_entry(ovr.gsi as usize);
     match ovr.flags.polarity() {
-      ApicIRQPolarity::NoOverride => {},
+      ApicIRQPolarity::NoOverride => {}
       ApicIRQPolarity::ActiveLo => redentry.set_active_low(true),
       ApicIRQPolarity::ActiveHi => redentry.set_active_low(false),
-      ApicIRQPolarity::Reserved => unreachable!()
+      ApicIRQPolarity::Reserved => unreachable!(),
     }
     match ovr.flags.trigger() {
-      ApicIRQTrigger::NoOverride => {},
+      ApicIRQTrigger::NoOverride => {}
       ApicIRQTrigger::Level => redentry.set_level_triggered(true),
       ApicIRQTrigger::Edge => redentry.set_level_triggered(false),
-      ApicIRQTrigger::Reserved => unreachable!()
+      ApicIRQTrigger::Reserved => unreachable!(),
     }
     self.set_entry(ovr.gsi as usize, redentry);
   }
@@ -355,7 +386,11 @@ impl IOApic {
     rtc
   }
 
-  pub fn init_hpet(&mut self, table: &crate::acpi::hpet::HPET, mapper: &mut MapperAllocator) -> hpet::HPET {
+  pub fn init_hpet(
+    &mut self,
+    table: &crate::acpi::hpet::HPET,
+    mapper: &mut MapperAllocator,
+  ) -> hpet::HPET {
     let mut hpet = hpet::HPET::new(table, mapper);
     serial_println!("HPET Table: {:?}", table);
     serial_println!("HPET: {:?}", hpet);
@@ -363,7 +398,11 @@ impl IOApic {
     hpet.disable();
 
     let timer = hpet.timer(0);
-    let on_irq = timer.config.irq_capabilities().lowest_one().expect("HPET has no irq abilities") as usize;
+    let on_irq = timer
+      .config
+      .irq_capabilities()
+      .lowest_one()
+      .expect("HPET has no irq abilities") as usize;
 
     let mut entry = self.get_entry(self.irqs[on_irq]);
     entry.set_mask(true);

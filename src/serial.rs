@@ -21,8 +21,8 @@ pub unsafe extern "C" fn debug_dot() {
 
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
+  let reenable = x86_64::instructions::interrupts::are_enabled();
   x86_64::instructions::interrupts::disable();
-  let reenable = x86_64::registers::rflags::read().contains(RFlags::INTERRUPT_FLAG);
   use core::fmt::Write;
   SERIAL1
     .lock()

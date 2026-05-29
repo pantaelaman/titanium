@@ -147,6 +147,7 @@ struct HHDMResponse {
   offset: u64,
 }
 
+#[repr(C)]
 struct PagingModeRequest {
   header: RequestHeader,
   mode: u64,
@@ -177,9 +178,35 @@ impl PagingModeRequest {
   }
 }
 
+#[repr(C)]
 struct PagingModeResponse {
   header: ResponseHeader,
   mode: PagingMode,
+}
+
+#[repr(C)]
+struct ExecutableAddrRequest {
+  header: RequestHeader,
+}
+
+impl ExecutableAddrRequest {
+  pub const fn new() -> Self {
+    Self {
+      header: RequestHeader {
+        common: LIMINE_COMMON_MAGIC,
+        subid: [0x71ba76863cc55f63, 0xb2644a48c516a487],
+        revision: 0,
+        response: core::ptr::null(),
+      },
+    }
+  }
+}
+
+#[repr(C)]
+struct ExecutableAddrResponse {
+  header: ResponseHeader,
+  phys_base: PhysAddr,
+  virt_base: VirtAddr,
 }
 
 #[used]
@@ -211,6 +238,11 @@ static RSDP_REQUEST: RSDPRequest = RSDPRequest::new();
 #[unsafe(link_section = ".limine_requests")]
 static PAGING_MODE_REQUEST: PagingModeRequest =
   PagingModeRequest::new(PagingMode::L4);
+
+//#[used]
+//#[unsafe(link_section = ".limine_requests")]
+//static EXECUTABLE_ADDR_REQUEST: ExecutableAddrRequest =
+//  ExecutableAddrRequest::new();
 
 #[used]
 #[unsafe(link_section = ".limine_requests_end")]
@@ -251,3 +283,9 @@ pub fn hhdm_offset() -> u64 {
 pub fn rsdp_addr() -> VirtAddr {
   unsafe { &*RSDP_REQUEST.header.response.cast::<RSDPResponse>() }.addr
 }
+
+// #[inline]
+// pub fn exec_addrs() -> (PhysAddr, VirtAddr) {
+//   let addr_resp = unsafe { &*EXECUTABLE_ADDR_REQUEST.header.response.cast::<ExecutableAddrResponse>() };
+//   (addr_resp.phys_base, addr_resp.virt_base)
+// }
